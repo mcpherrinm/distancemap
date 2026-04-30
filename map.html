@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Region Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #03060c;
+    --bg-1: #07111d;
+    --bg-2: #0c1a2b;
+    --line: #1a2f4d;
+    --line-soft: #14233a;
+    --amber: #ffb347;
+    --amber-glow: #ff7a00;
+    --cyan: #5ee0ff;
+    --cyan-soft: #2a7fa3;
+    --ink: #d8e5f3;
+    --ink-dim: #a3b9d4;
+    --ink-fade: #84a0bf;
+    --warn: #ff5577;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: var(--bg-0);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { display: flex; }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg,
+      rgba(255,255,255,0.012) 0, rgba(255,255,255,0.012) 1px,
+      transparent 1px, transparent 3px);
+    z-index: 100;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%);
+    z-index: 99;
+  }
+
+  #map-container {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    z-index: 1;
+    background:
+      radial-gradient(ellipse at center, rgba(20,40,70,0.4) 0%, rgba(3,6,12,0) 70%),
+      var(--bg-0);
+  }
+  #map-svg {
+    width: 100%; height: 100%;
+    display: block;
+    cursor: grab;
+  }
+  #map-svg:active { cursor: grabbing; }
+
+  .sphere-bg {
+    fill: rgba(8, 18, 32, 0.6);
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .graticule {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 0.5;
+    stroke-opacity: 0.55;
+    stroke-dasharray: 1 3;
+  }
+  .graticule-equator { stroke-opacity: 0.85; stroke-dasharray: none; stroke: #2a5078; }
+  .land {
+    fill: rgba(20, 38, 61, 0.55);
+    stroke: var(--cyan);
+    stroke-width: 0.6;
+    stroke-opacity: 0.45;
+  }
+
+  .arc {
+    fill: none;
+    stroke: #fff2dd;
+    stroke-width: 1;
+    stroke-opacity: 0.18;
+    pointer-events: stroke;
+    cursor: pointer;
+  }
+  .arc:hover { stroke-opacity: 0.95; stroke-width: 1.6; }
+
+  .arc-label {
+    fill: var(--amber);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    paint-order: stroke;
+    stroke: rgba(3,6,12,0.95);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    text-anchor: middle;
+    pointer-events: none;
+    letter-spacing: 0.05em;
+  }
+
+  .cluster-label {
+    fill: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    paint-order: stroke;
+    stroke: rgba(3,6,12,0.95);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    text-anchor: middle;
+    pointer-events: none;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .cluster-buffer {
+    fill: rgba(94,224,255,0.03);
+    stroke: var(--cyan);
+    stroke-width: 0.8;
+    stroke-opacity: 0.55;
+    stroke-dasharray: 4 3;
+    pointer-events: all;
+    cursor: pointer;
+    transition: stroke-opacity 0.12s, fill 0.12s;
+  }
+  .cluster-buffer:hover {
+    stroke-opacity: 0.95;
+    fill: rgba(94,224,255,0.09);
+  }
+
+  .point-dot {
+    fill: var(--amber);
+    stroke: var(--amber-glow);
+    stroke-width: 0.5;
+    pointer-events: all;
+    cursor: pointer;
+  }
+  .point-halo {
+    fill: var(--amber-glow);
+    fill-opacity: 0.35;
+    pointer-events: none;
+  }
+
+  aside {
+    position: relative;
+    flex: 0 0 360px;
+    width: 360px;
+    height: 100vh;
+    z-index: 10;
+    background: linear-gradient(180deg, rgba(7,17,29,0.96), rgba(3,6,12,0.96));
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  aside::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 28px;
+    background: linear-gradient(180deg, rgba(255,179,71,0.06), transparent);
+    pointer-events: none;
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--line); }
+
+  .drop {
+    display: block;
+    border: 1px dashed var(--line);
+    background: rgba(94,224,255,0.025);
+    padding: 22px 14px; text-align: center; cursor: pointer;
+    transition: all 0.18s ease; position: relative;
+  }
+  .drop:hover, .drop.over {
+    border-color: var(--amber);
+    background: rgba(255,179,71,0.06);
+  }
+  .drop .icon {
+    font-family: 'Major Mono Display', monospace;
+    font-size: 32px; color: var(--amber); line-height: 1;
+    margin-bottom: 10px; text-shadow: 0 0 14px var(--amber-glow);
+  }
+  .drop .lab {
+    font-size: 11px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink);
+  }
+  .drop .hint {
+    font-size: 10px; color: var(--ink-fade);
+    margin-top: 6px; letter-spacing: 0.05em;
+  }
+  .drop input[type=file] { display: none; }
+
+  .proj-switch { margin-top: 16px; }
+  .proj-switch .lbl {
+    font-size: 9px; letter-spacing: 0.3em;
+    color: var(--ink-fade); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .proj-select-wrap {
+    position: relative;
+    margin-top: 6px;
+  }
+  .proj-select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--bg-1);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 9px 28px 9px 10px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .proj-select:hover { border-color: var(--cyan-soft); }
+  .proj-select:focus {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .proj-select optgroup {
+    font-style: normal;
+    font-weight: 700;
+    color: var(--cyan);
+    background: var(--bg-0);
+    letter-spacing: 0.08em;
+  }
+  .proj-select option {
+    color: var(--ink);
+    background: var(--bg-1);
+    font-weight: 400;
+    padding: 4px 0;
+  }
+  .proj-select-arrow {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cyan);
+    font-size: 12px;
+    pointer-events: none;
+  }
+
+  .controls {
+    margin-top: 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ctrl-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--ink-dim);
+  }
+  .toggle {
+    width: 34px; height: 16px;
+    background: var(--bg-2); border: 1px solid var(--line);
+    position: relative; cursor: pointer; transition: all 0.15s;
+  }
+  .toggle::after {
+    content: ''; position: absolute; top: 1px; left: 1px;
+    width: 12px; height: 12px;
+    background: var(--ink-fade); transition: all 0.15s;
+  }
+  .toggle.on { background: rgba(255,179,71,0.15); border-color: var(--amber); }
+  .toggle.on::after {
+    left: 19px; background: var(--amber);
+    box-shadow: 0 0 6px var(--amber-glow);
+  }
+
+  .sources-header {
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 4px;
+    font-size: 10px;
+  }
+  .source-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 3px 0;
+  }
+  .source-name {
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .source-count {
+    color: var(--amber);
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+  }
+  .source-del {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    margin: 0 -4px 0 0;
+    color: var(--ink-fade);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 2px;
+    transition: color 0.12s, background 0.12s;
+  }
+  .source-del:hover {
+    color: var(--warn);
+    background: rgba(255,90,90,0.10);
+  }
+  .source-del:focus { outline: none; color: var(--warn); }
+
+  .section-title {
+    margin-top: 22px;
+    font-size: 9px; letter-spacing: 0.32em;
+    color: var(--ink-fade); text-transform: uppercase;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line-soft);
+    display: flex; justify-content: space-between;
+  }
+  .cluster-list { margin-top: 8px; }
+  .cluster-item {
+    display: grid; grid-template-columns: 22px 1fr auto;
+    gap: 10px; padding: 7px 4px;
+    border-bottom: 1px solid var(--line-soft);
+    cursor: pointer; transition: background 0.12s;
+    align-items: center;
+  }
+  .cluster-item:hover { background: rgba(94,224,255,0.05); }
+  .cluster-item .num {
+    font-family: 'Major Mono Display', monospace;
+    color: var(--cyan); font-size: 11px;
+  }
+  .cluster-item .meta { font-size: 10px; color: var(--ink); }
+  .cluster-item .meta .coord {
+    color: var(--ink-fade); font-size: 9px; margin-top: 1px;
+  }
+  .cluster-item .count {
+    font-size: 11px; color: var(--amber);
+    font-variant-numeric: tabular-nums;
+  }
+  .cluster-name {
+    display: inline-block;
+    cursor: text;
+    outline: none;
+    border-bottom: 1px dashed transparent;
+    padding: 0 2px;
+    margin: 0 -2px;
+    transition: border-color 0.12s, background 0.12s;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  .cluster-item:hover .cluster-name {
+    border-bottom-color: var(--ink-fade);
+  }
+  .cluster-name:focus {
+    border-bottom-color: var(--amber);
+    background: rgba(255,179,71,0.10);
+    color: var(--amber);
+    white-space: normal;
+    overflow: visible;
+    max-width: none;
+  }
+  .empty {
+    color: var(--ink-fade); font-size: 11px;
+    text-align: center; padding: 20px 0;
+    letter-spacing: 0.05em;
+  }
+
+  #readout {
+    position: fixed; pointer-events: none; z-index: 20;
+    padding: 6px 10px;
+    background: rgba(3,6,12,0.92);
+    border: 1px solid var(--amber);
+    color: var(--ink); font-size: 11px;
+    letter-spacing: 0.05em;
+    transform: translate(12px, 12px);
+    opacity: 0; transition: opacity 0.1s;
+    box-shadow: 0 0 20px rgba(255,122,0,0.2);
+    max-width: 380px;
+  }
+  #readout.show { opacity: 1; }
+  #readout .name { color: var(--amber); margin-bottom: 2px; }
+  #readout .row { color: var(--ink-dim); font-size: 10px; }
+  #readout .kv {
+    display: grid; grid-template-columns: minmax(0, auto) 1fr;
+    gap: 0 10px; font-size: 10px; margin-top: 3px;
+    max-height: 60vh; overflow: hidden;
+  }
+  #readout .kv .k { color: var(--cyan-soft); white-space: nowrap; }
+  #readout .kv .v { color: var(--ink); word-break: break-word; }
+
+  .toast {
+    position: fixed; top: 78px; left: 50%;
+    transform: translateX(-50%); z-index: 30;
+    padding: 8px 16px;
+    background: rgba(3,6,12,0.95);
+    border: 1px solid var(--amber);
+    font-size: 10px; letter-spacing: 0.25em;
+    text-transform: uppercase; color: var(--amber);
+    opacity: 0; transition: opacity 0.25s;
+  }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 720px) {
+    body { flex-direction: column; }
+    aside {
+      width: 100%; flex: 0 0 50vh; height: 50vh;
+      border-left: none; border-top: 1px solid var(--line);
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="map-container">
+  <svg id="map-svg" preserveAspectRatio="xMidYMid meet">
+    <g id="zoom-root">
+      <path id="sphere" class="sphere-bg" />
+      <path id="graticule-eq" class="graticule graticule-equator" />
+      <path id="graticule" class="graticule" />
+      <g id="land-layer"></g>
+      <g id="arc-layer"></g>
+      <g id="cluster-layer"></g>
+      <g id="point-layer"></g>
+      <g id="arc-label-layer"></g>
+      <g id="cluster-label-layer"></g>
+    </g>
+  </svg>
+</div>
+
+<aside>
+  <div class="panel-body">
+    <label class="drop" id="drop">
+      <div class="icon">⤓</div>
+      <div class="lab">Drop OSM file(s)</div>
+      <div class="hint">Overpass JSON or GeoJSON · multi-select OK</div>
+      <input type="file" id="file" multiple accept=".json,.geojson,application/json,application/geo+json"/>
+    </label>
+
+    <div class="proj-switch">
+      <div class="lbl">Projection</div>
+      <div class="proj-select-wrap">
+        <select id="proj-select" class="proj-select"></select>
+        <span class="proj-select-arrow">▾</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="ctrl-row">
+        <span>Distances</span>
+        <div class="toggle on" id="t-distances"></div>
+      </div>
+      <div class="ctrl-row">
+        <span>Region Labels</span>
+        <div class="toggle on" id="t-region-labels"></div>
+      </div>
+      <div class="ctrl-row">
+        <span>Continents</span>
+        <div class="toggle on" id="t-continents"></div>
+      </div>
+      <div class="ctrl-row">
+        <span>Reset View</span>
+        <button id="btn-reset-view" style="
+          background: transparent; color: var(--cyan); border: 1px solid var(--cyan);
+          font-family: inherit; font-size: 9px; letter-spacing: 0.25em;
+          text-transform: uppercase; padding: 3px 10px; cursor: pointer;
+        ">Recenter</button>
+      </div>
+      <div class="ctrl-row">
+        <span>Export</span>
+        <button id="btn-export-svg" style="
+          background: transparent; color: var(--amber); border: 1px solid var(--amber);
+          font-family: inherit; font-size: 9px; letter-spacing: 0.25em;
+          text-transform: uppercase; padding: 3px 10px; cursor: pointer;
+        ">Save SVG</button>
+      </div>
+    </div>
+
+    <div id="loaded-files" style="margin-top: 12px; font-size: 10px; color: var(--ink-fade);"></div>
+
+    <div class="section-title">
+      <span>Regions</span>
+      <span id="region-count">—</span>
+    </div>
+    <div class="cluster-list" id="cluster-list">
+      <div class="empty">awaiting transmission…</div>
+    </div>
+  </div>
+</aside>
+
+<div id="readout"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-geo-projection@4.0.0/dist/d3-geo-projection.min.js"></script>
+
+<script>
+/* =====================================================================
+   REGION MAP · 2D
+   SVG + d3-geo. Projections: Mercator, Equal Earth, Azimuthal Equidistant, Dymaxion.
+   ===================================================================== */
+
+(async function main() {
+
+const EARTH_KM   = 6371;
+const CLUSTER_KM = 100;
+
+const state = {
+  points: [],
+  clusters: [],
+  pairs: [],
+  showDistances: true,
+  showRegionLabels: true,
+  showContinents: true,
+  projectionName: 'geoRobinson',
+  landGeo: null
+};
+const loadedFiles = [];
+
+const mapContainer = document.getElementById('map-container');
+const svg        = d3.select('#map-svg');
+const zoomRoot   = d3.select('#zoom-root');
+const sphereEl   = d3.select('#sphere');
+const gratEl     = d3.select('#graticule');
+const gratEqEl   = d3.select('#graticule-eq');
+const landLayer  = d3.select('#land-layer');
+const arcLayer   = d3.select('#arc-layer');
+const clusterLayer = d3.select('#cluster-layer');
+const pointLayer = d3.select('#point-layer');
+const arcLabelLayer = d3.select('#arc-label-layer');
+const clusterLabelLayer = d3.select('#cluster-label-layer');
+const readout    = document.getElementById('readout');
+const toastEl    = document.getElementById('toast');
+
+/* ---------- PROJECTIONS ---------- */
+const PROJECTION_GROUPS = [
+  { group: 'Cylindrical', items: [
+    ['geoMercator',                  'Mercator'],
+    ['geoTransverseMercator',        'Transverse Mercator'],
+    ['geoEquirectangular',           'Equirectangular (Plate Carrée)'],
+    ['geoCylindricalEqualArea',      'Cylindrical Equal Area'],
+    ['geoCylindricalStereographic',  'Cylindrical Stereographic'],
+    ['geoMiller',                    'Miller'],
+    ['geoPatterson',                 'Patterson'],
+    ['geoTimes',                     'Times'],
+  ]},
+  { group: 'Pseudocylindrical', items: [
+    ['geoEqualEarth',          'Equal Earth'],
+    ['geoNaturalEarth1',       'Natural Earth'],
+    ['geoNaturalEarth2',       'Natural Earth II'],
+    ['geoRobinson',            'Robinson'],
+    ['geoMollweide',           'Mollweide'],
+    ['geoSinusoidal',          'Sinusoidal'],
+    ['geoSinuMollweide',       'Sinu-Mollweide'],
+    ['geoHomolosine',          'Goode Homolosine'],
+    ['geoBoggs',               'Boggs Eumorphic'],
+    ['geoBromley',             'Bromley'],
+    ['geoCraster',             'Craster Parabolic'],
+    ['geoEckert1',             'Eckert I'],
+    ['geoEckert2',             'Eckert II'],
+    ['geoEckert3',             'Eckert III'],
+    ['geoEckert4',             'Eckert IV'],
+    ['geoEckert5',             'Eckert V'],
+    ['geoEckert6',             'Eckert VI'],
+    ['geoFoucaut',             'Foucaut'],
+    ['geoFoucautSinusoidal',   'Foucaut Sinusoidal'],
+    ['geoHill',                'Hill Eucyclic'],
+    ['geoKavrayskiy7',         'Kavrayskiy VII'],
+    ['geoLarrivee',            'Larrivée'],
+    ['geoLoximuthal',          'Loximuthal'],
+    ['geoMtFlatPolarParabolic','McBryde-Thomas Parabolic'],
+    ['geoMtFlatPolarQuartic',  'McBryde-Thomas Quartic'],
+    ['geoMtFlatPolarSinusoidal','McBryde-Thomas Sinusoidal'],
+    ['geoNellHammer',          'Nell-Hammer'],
+    ['geoWagner4',             'Wagner IV'],
+    ['geoWagner6',             'Wagner VI'],
+    ['geoWagner7',             'Wagner VII'],
+    ['geoWinkel3',             'Winkel Tripel'],
+    ['geoAitoff',              'Aitoff'],
+    ['geoHammer',              'Hammer'],
+    ['geoHufnagel',            'Hufnagel'],
+    ['geoHyperelliptical',     'Hyperelliptical'],
+    ['geoBaker',               'Baker Dinomic'],
+  ]},
+  { group: 'Conic', items: [
+    ['geoConicConformal',      'Conic Conformal'],
+    ['geoConicEqualArea',      'Conic Equal Area'],
+    ['geoConicEquidistant',    'Conic Equidistant'],
+    ['geoAlbers',              'Albers'],
+    ['geoBonne',               'Bonne'],
+    ['geoBottomley',           'Bottomley'],
+    ['geoPolyconic',           'American Polyconic'],
+    ['geoRectangularPolyconic','Rectangular Polyconic'],
+  ]},
+  { group: 'Azimuthal', items: [
+    ['geoOrthographic',          'Orthographic'],
+    ['geoStereographic',         'Stereographic'],
+    ['geoGnomonic',              'Gnomonic'],
+    ['geoAzimuthalEqualArea',    'Azimuthal Equal Area'],
+    ['geoAzimuthalEquidistant',  'Azimuthal Equidistant (North Pole)'],
+    ['geoSatellite',             'Satellite (Tilted Perspective)'],
+    ['geoAiry',                  'Airy'],
+    ['geoAugust',                'August Conformal'],
+    ['geoEisenlohr',             'Eisenlohr'],
+    ['geoGuyou',                 'Guyou'],
+    ['geoLagrange',              'Lagrange'],
+    ['geoLittrow',               'Littrow'],
+    ['geoVanDerGrinten',         'Van der Grinten I'],
+    ['geoVanDerGrinten2',        'Van der Grinten II'],
+    ['geoVanDerGrinten3',        'Van der Grinten III'],
+    ['geoVanDerGrinten4',        'Van der Grinten IV'],
+    ['geoNicolosi',              'Nicolosi Globular'],
+    ['geoLaskowski',             'Laskowski Tri-Optimal'],
+    ['geoFahey',                 'Fahey'],
+  ]},
+  { group: 'Polyhedral & Quincuncial', items: [
+    ['geoPolyhedralWaterman',    'Waterman Butterfly'],
+    ['geoPolyhedralButterfly',   'Polyhedral Butterfly'],
+    ['geoPolyhedralCollignon',   'Polyhedral Collignon'],
+    ['geoPeirceQuincuncial',     'Peirce Quincuncial'],
+    ['geoGringortenQuincuncial', 'Gringorten Quincuncial'],
+    ['geoCollignon',             'Collignon'],
+    ['geoHealpix',               'HEALPix'],
+  ]},
+  { group: 'Interrupted', items: [
+    ['geoInterruptedBoggs',                'Interrupted Boggs'],
+    ['geoInterruptedHomolosine',           'Interrupted Homolosine'],
+    ['geoInterruptedMollweide',            'Interrupted Mollweide'],
+    ['geoInterruptedMollweideHemispheres', 'Interrupted Mollweide (Hemispheres)'],
+    ['geoInterruptedSinuMollweide',        'Interrupted Sinu-Mollweide'],
+    ['geoInterruptedSinusoidal',           'Interrupted Sinusoidal'],
+    ['geoInterruptedQuarticAuthalic',      'Interrupted Quartic Authalic'],
+  ]},
+  { group: 'Retroazimuthal & Specialty', items: [
+    ['geoArmadillo',                     'Armadillo'],
+    ['geoBerghaus',                      'Berghaus Star'],
+    ['geoBertin1953',                    'Bertin 1953'],
+    ['geoCraig',                         'Craig Retroazimuthal'],
+    ['geoGilbert',                       'Gilbert Two-World'],
+    ['geoGingery',                       'Gingery World'],
+    ['geoGinzburg4',                     'Ginzburg IV'],
+    ['geoGinzburg5',                     'Ginzburg V'],
+    ['geoGinzburg6',                     'Ginzburg VI'],
+    ['geoGinzburg8',                     'Ginzburg VIII'],
+    ['geoGinzburg9',                     'Ginzburg IX'],
+    ['geoGringorten',                    'Gringorten Equal Area'],
+    ['geoHammerRetroazimuthal',          'Hammer Retroazimuthal'],
+    ['geoModifiedStereographicAlaska',   'Modified Stereographic (Alaska)'],
+    ['geoModifiedStereographicGs48',     'Modified Stereographic (GS48)'],
+    ['geoModifiedStereographicGs50',     'Modified Stereographic (GS50)'],
+    ['geoModifiedStereographicLee',      'Modified Stereographic (Lee)'],
+    ['geoModifiedStereographicMiller',   'Modified Stereographic (Miller)'],
+    ['geoTwoPointAzimuthalUsa',          'Two-Point Azimuthal (USA)'],
+    ['geoTwoPointEquidistantUsa',        'Two-Point Equidistant (USA)'],
+    ['geoChamberlinAfrica',              'Chamberlin Trimetric (Africa)'],
+    ['geoWiechel',                       'Wiechel'],
+  ]},
+];
+
+// Projections that can't represent the full sphere — must fit a clipped polygon
+const NEEDS_CLIPPED_FIT = new Set([
+  'geoMercator',
+  'geoTransverseMercator',
+  'geoCylindricalStereographic',
+  'geoMiller',
+  'geoCylindricalEqualArea',
+]);
+
+function buildProjection(key) {
+  let proj = null;
+  if (typeof d3[key] === 'function') {
+    try { proj = d3[key](); } catch (e) { /* fall through */ }
+  }
+  if (!proj || typeof proj.scale !== 'function') {
+    proj = d3.geoMercator();
+    state.projectionName = 'geoMercator';
+  }
+  // Per-projection tweaks for usability
+  if (key === 'geoAzimuthalEquidistant') {
+    proj.rotate([0, -90]).clipAngle(180 - 1e-3);
+  } else if (key === 'geoAzimuthalEqualArea' ||
+             key === 'geoStereographic' ||
+             key === 'geoOrthographic') {
+    if (proj.clipAngle) proj.clipAngle(90 - 1e-3);
+  } else if (key === 'geoGnomonic') {
+    proj.clipAngle(60);
+  } else if (key === 'geoSatellite') {
+    proj.distance(1.4).tilt(0).rotate([0, 0]).clipAngle(45);
+  }
+  if (proj.precision) proj.precision(0.5);
+  return proj;
+}
+
+let projection = buildProjection(state.projectionName);
+let pathGen = d3.geoPath(projection);
+
+function fitProjection() {
+  const w = mapContainer.clientWidth || innerWidth;
+  const h = mapContainer.clientHeight || innerHeight;
+  const ext = [[40, 80], [w-40, h-80]];
+  const sphere  = { type: 'Sphere' };
+  const clipped = {
+    type: 'Polygon',
+    coordinates: [[[-180, -82], [180, -82], [180, 82], [-180, 82], [-180, -82]]]
+  };
+  try {
+    projection.fitExtent(ext, NEEDS_CLIPPED_FIT.has(state.projectionName) ? clipped : sphere);
+  } catch (e) {
+    try { projection.fitExtent(ext, clipped); }
+    catch (e2) { /* leave projection at default */ }
+  }
+  // Validate; if scale went infinite/NaN, retry with clipped polygon
+  const k = projection.scale ? projection.scale() : 0;
+  if (!isFinite(k) || k <= 0) {
+    try { projection.fitExtent(ext, clipped); } catch (e) { /* ignore */ }
+  }
+  pathGen = d3.geoPath(projection);
+}
+
+/* ---------- ZOOM ---------- */
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.5, 40])
+  .on('zoom', (ev) => {
+    zoomRoot.attr('transform', ev.transform);
+    const k = ev.transform.k;
+    const inv = 1 / Math.sqrt(k);
+    // Dots use pure 1/k so they stay a constant pixel size as you zoom — sqrt
+    // scaling let them creep up by √k on screen, which read as "getting bigger."
+    pointLayer.selectAll('circle.point-dot').attr('r', 3 / k);
+    pointLayer.selectAll('circle.point-halo').attr('r', 6 / k);
+    clusterLayer.selectAll('.cluster-buffer').attr('stroke-width', 0.8 * inv);
+    arcLayer.selectAll('.arc').attr('stroke-width', 1 * inv);
+    arcLabelLayer.selectAll('text')
+      .style('font-size', (9 / k) + 'px')
+      .style('stroke-width', 3 / k);
+    clusterLabelLayer.selectAll('text')
+      .style('font-size', (10 / k) + 'px')
+      .style('stroke-width', 3 / k);
+  });
+svg.call(zoomBehavior);
+
+document.getElementById('btn-reset-view').addEventListener('click', () => {
+  svg.transition().duration(450).call(zoomBehavior.transform, d3.zoomIdentity);
+});
+
+/* ---------- SVG EXPORT ---------- */
+// CSS the standalone SVG needs to render outside this page. Hover/cursor rules
+// are dropped — they're meaningless in a static file.
+const EXPORT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+.sphere-bg { fill: rgba(8,18,32,0.6); stroke: #1a2f4d; stroke-width: 1; }
+.graticule { fill: none; stroke: #1a2f4d; stroke-width: 0.5; stroke-opacity: 0.55; stroke-dasharray: 1 3; }
+.graticule-equator { stroke-opacity: 0.85; stroke-dasharray: none; stroke: #2a5078; }
+.land { fill: rgba(20,38,61,0.55); stroke: #5ee0ff; stroke-width: 0.6; stroke-opacity: 0.45; }
+.arc { fill: none; stroke: #fff2dd; stroke-width: 1; stroke-opacity: 0.7; }
+.arc-label { fill: #ffb347; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; font-weight: 500;
+  paint-order: stroke; stroke: #03060c; stroke-width: 3; stroke-linejoin: round; text-anchor: middle; letter-spacing: 0.05em; }
+.cluster-label { fill: #5ee0ff; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 500;
+  paint-order: stroke; stroke: #03060c; stroke-width: 3; stroke-linejoin: round; text-anchor: middle;
+  letter-spacing: 0.08em; text-transform: uppercase; }
+.cluster-buffer { fill: rgba(94,224,255,0.03); stroke: #5ee0ff; stroke-width: 0.8; stroke-opacity: 0.55; stroke-dasharray: 4 3; }
+.point-dot { fill: #ffb347; stroke: #ff7a00; stroke-width: 0.5; }
+.point-halo { fill: #ff7a00; fill-opacity: 0.35; }
+`;
+
+function exportSVG() {
+  const w = mapContainer.clientWidth || innerWidth;
+  const h = mapContainer.clientHeight || innerHeight;
+  const cloned = svg.node().cloneNode(true);
+  cloned.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  cloned.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  cloned.setAttribute('width', w);
+  cloned.setAttribute('height', h);
+  cloned.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  // Remove the cursor inline-style/class noise that's irrelevant in a static file
+  cloned.removeAttribute('style');
+
+  // Background rect — the live page paints this via #map-container CSS,
+  // which won't follow the SVG out the door.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const bg = document.createElementNS(SVG_NS, 'rect');
+  bg.setAttribute('width', '100%');
+  bg.setAttribute('height', '100%');
+  bg.setAttribute('fill', '#03060c');
+  cloned.insertBefore(bg, cloned.firstChild);
+
+  const styleEl = document.createElementNS(SVG_NS, 'style');
+  styleEl.textContent = EXPORT_CSS;
+  cloned.insertBefore(styleEl, cloned.firstChild);
+
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+              new XMLSerializer().serializeToString(cloned);
+  const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `region-map-${stamp}.svg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast(`exported ${a.download}`);
+}
+
+document.getElementById('btn-export-svg').addEventListener('click', exportSVG);
+
+/* ---------- LAND DATA ---------- */
+async function loadLand() {
+  try {
+    const res = await fetch('./land-110m.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.landGeo = topoToGeoJSON(await res.json());
+  } catch(e) {
+    console.error('land load failed', e);
+  }
+}
+
+function topoToGeoJSON(topo) {
+  const arcs = topo.arcs;
+  const tx = topo.transform;
+  const land = topo.objects && (topo.objects.land || topo.objects.countries);
+  if (!land) return null;
+  function decodeArc(idx) {
+    const reverse = idx < 0;
+    if (reverse) idx = ~idx;
+    const arc = arcs[idx];
+    let x = 0, y = 0;
+    const out = [];
+    for (let i=0; i<arc.length; i++) {
+      x += arc[i][0]; y += arc[i][1];
+      out.push([ x*tx.scale[0]+tx.translate[0], y*tx.scale[1]+tx.translate[1] ]);
+    }
+    return reverse ? out.reverse() : out;
+  }
+  function ring(arcIdxs) {
+    const pts = [];
+    for (let i=0; i<arcIdxs.length; i++) {
+      const seg = decodeArc(arcIdxs[i]);
+      if (i>0) seg.shift();
+      pts.push(...seg);
+    }
+    return pts;
+  }
+  function geomToGeoJSON(g) {
+    if (g.type === 'Polygon') return { type:'Polygon', coordinates: g.arcs.map(ring) };
+    if (g.type === 'MultiPolygon') return { type:'MultiPolygon', coordinates: g.arcs.map(p=>p.map(ring)) };
+    return null;
+  }
+  const features = [];
+  if (land.type === 'GeometryCollection') {
+    for (const g of land.geometries) {
+      const decoded = geomToGeoJSON(g);
+      if (decoded) features.push({ type:'Feature', geometry: decoded, properties:{} });
+    }
+  } else {
+    const decoded = geomToGeoJSON(land);
+    if (decoded) features.push({ type:'Feature', geometry: decoded, properties:{} });
+  }
+  return { type:'FeatureCollection', features };
+}
+
+/* ---------- DATA PARSING ---------- */
+function parseSource(json) {
+  const pts = [];
+  if (json && json.elements && Array.isArray(json.elements)) {
+    for (const el of json.elements) {
+      let lat, lon;
+      if (el.type === 'node' && el.lat != null) { lat = el.lat; lon = el.lon; }
+      else if (el.center) { lat = el.center.lat; lon = el.center.lon; }
+      else continue;
+      const tags = el.tags || {};
+      pts.push({
+        lat, lon,
+        name: tags.name || tags['name:en'] || tags.operator || `OSM ${el.type} ${el.id}`,
+        tags
+      });
+    }
+  } else if (json && json.type === 'FeatureCollection' && Array.isArray(json.features)) {
+    for (const f of json.features) {
+      if (!f.geometry) continue;
+      let lat, lon;
+      const g = f.geometry;
+      if (g.type === 'Point') {
+        [lon, lat] = g.coordinates;
+      } else if (g.type === 'Polygon') {
+        const ring = g.coordinates[0]; if (!ring || !ring.length) continue;
+        let sx=0, sy=0; for (const c of ring) { sx+=c[0]; sy+=c[1]; }
+        lon = sx/ring.length; lat = sy/ring.length;
+      } else if (g.type === 'MultiPolygon') {
+        const ring = g.coordinates[0] && g.coordinates[0][0];
+        if (!ring || !ring.length) continue;
+        let sx=0, sy=0; for (const c of ring) { sx+=c[0]; sy+=c[1]; }
+        lon = sx/ring.length; lat = sy/ring.length;
+      } else continue;
+      const props = f.properties || {};
+      pts.push({
+        lat, lon,
+        name: props.name || props['name:en'] || props.operator || `Feature ${f.id||''}`,
+        tags: props
+      });
+    }
+  }
+  return pts;
+}
+
+/* ---------- MATH ---------- */
+function haversineKm(a, b) {
+  const R = EARTH_KM;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLon = (b.lon - a.lon) * Math.PI / 180;
+  const x = Math.sin(dLat/2)**2 +
+            Math.cos(a.lat*Math.PI/180) * Math.cos(b.lat*Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+function geoMidpoint(a, b) {
+  const φ1 = a.lat*Math.PI/180, λ1 = a.lon*Math.PI/180;
+  const φ2 = b.lat*Math.PI/180, λ2 = b.lon*Math.PI/180;
+  const Δλ = λ2 - λ1;
+  const Bx = Math.cos(φ2) * Math.cos(Δλ);
+  const By = Math.cos(φ2) * Math.sin(Δλ);
+  const φ3 = Math.atan2(Math.sin(φ1)+Math.sin(φ2),
+                         Math.sqrt((Math.cos(φ1)+Bx)**2 + By*By));
+  const λ3 = λ1 + Math.atan2(By, Math.cos(φ1)+Bx);
+  return { lat: φ3*180/Math.PI, lon: ((λ3*180/Math.PI)+540)%360 - 180 };
+}
+function formatKm(km) {
+  if (km < 100) return km.toFixed(0)+' km';
+  if (km < 1000) return Math.round(km)+' km';
+  return (km/1000).toFixed(km<10000?2:1)+'k km';
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------- CLUSTERING ---------- */
+function clusterByDistance(points, maxKm) {
+  const n = points.length;
+  const parent = Array.from({length:n}, (_,i)=>i);
+  const find = i => { while (parent[i]!==i) { parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  const union = (i,j) => { parent[find(i)] = find(j); };
+  for (let i=0; i<n; i++) {
+    for (let j=i+1; j<n; j++) {
+      if (haversineKm(points[i], points[j]) <= maxKm) union(i,j);
+    }
+  }
+  const buckets = new Map();
+  for (let i=0; i<n; i++) {
+    const r = find(i);
+    if (!buckets.has(r)) buckets.set(r, []);
+    buckets.get(r).push(points[i]);
+  }
+  const clusters = [];
+  for (const pts of buckets.values()) {
+    let x=0,y=0,z=0;
+    for (const p of pts) {
+      const φ = p.lat*Math.PI/180, λ = p.lon*Math.PI/180;
+      x += Math.cos(φ)*Math.cos(λ);
+      y += Math.cos(φ)*Math.sin(λ);
+      z += Math.sin(φ);
+    }
+    const len = Math.sqrt(x*x+y*y+z*z) || 1;
+    x/=len; y/=len; z/=len;
+    const lat = Math.asin(Math.max(-1, Math.min(1, z))) * 180/Math.PI;
+    const lon = Math.atan2(y, x) * 180/Math.PI;
+    const center = { lat, lon };
+    let maxD = 0;
+    for (const p of pts) maxD = Math.max(maxD, haversineKm(center, p));
+    clusters.push({
+      center, points: pts,
+      name: regionLabel(center, pts),
+      radiusKm: Math.max(60, Math.min(maxD + 30, maxKm))
+    });
+  }
+  clusters.sort((a,b) => b.points.length - a.points.length);
+  return clusters;
+}
+
+function regionLabel({lat, lon}, pts) {
+  for (const p of pts) {
+    const t = p.tags || {};
+    if (t.region) return t.region;
+  }
+  for (const p of pts) {
+    const t = p.tags || {};
+    if (t['addr:city']) return t['addr:city'];
+    if (t['addr:state']) return t['addr:state'];
+    if (t['addr:country']) return t['addr:country'];
+  }
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(1)}°${ns} ${Math.abs(lon).toFixed(1)}°${ew}`;
+}
+
+function rebuildClusters() {
+  state.clusters = clusterByDistance(state.points, CLUSTER_KM);
+  state.pairs = [];
+  for (let i=0; i<state.clusters.length; i++) {
+    for (let j=i+1; j<state.clusters.length; j++) {
+      state.pairs.push({
+        i, j,
+        distKm: haversineKm(state.clusters[i].center, state.clusters[j].center)
+      });
+    }
+  }
+}
+
+/* ---------- RENDER ---------- */
+function renderAll() {
+  fitProjection();
+  renderBackground();
+  renderLand();
+  renderArcs();
+  renderClusters();
+  renderPoints();
+  renderArcLabels();
+  renderClusterLabels();
+  svg.call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+function renderBackground() {
+  sphereEl.attr('d', pathGen({ type: 'Sphere' }) || '');
+  const grat = d3.geoGraticule().step([15, 15]);
+  gratEl.attr('d', pathGen(grat()) || '');
+  gratEqEl.attr('d', pathGen({
+    type: 'LineString',
+    coordinates: Array.from({length:361}, (_,i) => [i-180, 0])
+  }) || '');
+}
+
+function renderLand() {
+  if (!state.landGeo) { landLayer.selectAll('*').remove(); return; }
+  const sel = landLayer.selectAll('path').data(state.landGeo.features || []);
+  sel.exit().remove();
+  sel.enter().append('path').attr('class','land')
+    .merge(sel)
+    .attr('d', d => pathGen(d) || '');
+  landLayer.attr('display', state.showContinents ? null : 'none');
+}
+
+function renderArcs() {
+  arcLayer.selectAll('*').remove();
+  for (const pair of state.pairs) {
+    const a = state.clusters[pair.i].center;
+    const b = state.clusters[pair.j].center;
+    const line = {
+      type: 'LineString',
+      coordinates: [[a.lon, a.lat], [b.lon, b.lat]]
+    };
+    const d = pathGen(line);
+    if (!d) continue;
+    arcLayer.append('path')
+      .attr('class','arc')
+      .attr('d', d)
+      .datum(pair)
+      .on('mousemove', (ev, p) => {
+        const ca = state.clusters[p.i], cb = state.clusters[p.j];
+        showReadout(ev,
+          `${escapeHtml(ca.name)} ↔ ${escapeHtml(cb.name)}`,
+          [`great-circle ${formatKm(p.distKm)}`]
+        );
+      })
+      .on('mouseleave', hideReadout);
+  }
+}
+
+function renderClusters() {
+  clusterLayer.selectAll('*').remove();
+  state.clusters.forEach((c, idx) => {
+    const bufRad = (c.radiusKm + 500) / EARTH_KM * 180 / Math.PI;
+    const bufGeo = d3.geoCircle()
+      .center([c.center.lon, c.center.lat])
+      .radius(bufRad)();
+    const bufD = pathGen(bufGeo);
+    if (!bufD) return;
+    clusterLayer.append('path')
+      .attr('class', 'cluster-buffer')
+      .attr('d', bufD)
+      .datum({ idx })
+      .on('mousemove', (ev, d) => {
+        const cl = state.clusters[d.idx];
+        showReadout(ev, escapeHtml(cl.name), [
+          `${cl.points.length} point${cl.points.length>1?'s':''} · radius ${formatKm(cl.radiusKm)}`,
+          `buffer ${formatKm(cl.radiusKm + 500)}`,
+          `${cl.center.lat.toFixed(3)}°, ${cl.center.lon.toFixed(3)}°`
+        ]);
+      })
+      .on('mouseleave', hideReadout);
+  });
+}
+
+function renderPoints() {
+  pointLayer.selectAll('*').remove();
+  for (const p of state.points) {
+    const xy = projection([p.lon, p.lat]);
+    if (!xy) continue;
+    pointLayer.append('circle')
+      .attr('class','point-halo')
+      .attr('cx', xy[0]).attr('cy', xy[1])
+      .attr('r', 6);
+    pointLayer.append('circle')
+      .attr('class','point-dot')
+      .attr('cx', xy[0]).attr('cy', xy[1])
+      .attr('r', 3)
+      .datum(p)
+      .on('mousemove', (ev, d) => {
+        const rows = [`${d.lat.toFixed(3)}°, ${d.lon.toFixed(3)}°`];
+        const entries = Object.entries(d.tags || {})
+          .sort(([a], [b]) => a.localeCompare(b));
+        if (entries.length) {
+          rows.push('<div class="kv">' + entries.map(([k, v]) =>
+            `<span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span>`
+          ).join('') + '</div>');
+        }
+        showReadout(ev, escapeHtml(d.name), rows);
+      })
+      .on('mouseleave', hideReadout);
+  }
+}
+
+function renderClusterLabels() {
+  clusterLabelLayer.selectAll('*').remove();
+  if (!state.showRegionLabels) return;
+  const k = d3.zoomTransform(svg.node()).k;
+  for (const c of state.clusters) {
+    const xy = projection([c.center.lon, c.center.lat]);
+    if (!xy || !isFinite(xy[0]) || !isFinite(xy[1])) continue;
+    clusterLabelLayer.append('text')
+      .attr('class', 'cluster-label')
+      .attr('x', xy[0])
+      .attr('y', xy[1])
+      .attr('dy', '1.1em')
+      .style('font-size', (10 / k) + 'px')
+      .style('stroke-width', 3 / k)
+      .text(c.name);
+  }
+}
+
+function renderArcLabels() {
+  arcLabelLayer.selectAll('*').remove();
+  if (!state.showDistances) return;
+  const k = d3.zoomTransform(svg.node()).k;
+  for (const pair of state.pairs) {
+    const a = state.clusters[pair.i].center;
+    const b = state.clusters[pair.j].center;
+    const mid = geoMidpoint(a, b);
+    const xy = projection([mid.lon, mid.lat]);
+    if (!xy) continue;
+    arcLabelLayer.append('text')
+      .attr('class','arc-label')
+      .attr('x', xy[0]).attr('y', xy[1] - 2)
+      .style('font-size', (9 / k) + 'px')
+      .style('stroke-width', 3 / k)
+      .text(formatKm(pair.distKm));
+  }
+}
+
+/* ---------- READOUT ---------- */
+function showReadout(ev, name, rows) {
+  readout.innerHTML = `<div class="name">${name}</div>` +
+    (rows||[]).map(r => `<div class="row">${r}</div>`).join('');
+  readout.style.left = ev.clientX + 'px';
+  readout.style.top  = ev.clientY + 'px';
+  readout.classList.add('show');
+}
+function hideReadout() { readout.classList.remove('show'); }
+
+/* ---------- FILE INGEST ---------- */
+function readAsText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload  = () => resolve(r.result);
+    r.onerror = () => reject(new Error('read failed'));
+    r.readAsText(file);
+  });
+}
+async function ingestFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  let totalAdded = 0;
+  const errors = [];
+  for (const f of files) {
+    try {
+      const text = await readAsText(f);
+      const json = JSON.parse(text);
+      const incoming = parseSource(json);
+      if (!incoming.length) { errors.push(f.name); continue; }
+      // Store parsed points with the source so we can remove it later
+      loadedFiles.push({ name: f.name, points: incoming });
+      totalAdded += incoming.length;
+    } catch(e) {
+      errors.push(f.name);
+    }
+  }
+  recomputeFromSources();
+  rebuildClusters();
+  renderAll();
+  updatePanel();
+  const errSuffix = errors.length ? ` · ${errors.length} ERR` : '';
+  const fileWord = files.length > 1 ? `${files.length} files` : '1 file';
+  showToast(`+${totalAdded} · ${fileWord}${errSuffix} · ${state.points.length} points · ${state.clusters.length} regions`);
+}
+
+function recomputeFromSources() {
+  state.points = [];
+  const seen = new Set();
+  for (const f of loadedFiles) {
+    for (const p of f.points) {
+      const k = `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      state.points.push(p);
+    }
+  }
+}
+
+function removeSource(idx) {
+  if (idx < 0 || idx >= loadedFiles.length) return;
+  const removed = loadedFiles.splice(idx, 1)[0];
+  recomputeFromSources();
+  rebuildClusters();
+  renderAll();
+  updatePanel();
+  showToast(`removed ${removed.name} · ${state.points.length} points · ${state.clusters.length} regions`);
+}
+
+/* ---------- DROPZONE ---------- */
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  ingestFiles(e.target.files);
+  e.target.value = '';
+});
+;['dragenter','dragover'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+;['dragleave','drop'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => ingestFiles(e.dataTransfer.files));
+
+/* ---------- PANEL UPDATE ---------- */
+function updatePanel() {
+  const fl = document.getElementById('loaded-files');
+  fl.innerHTML = '';
+  if (loadedFiles.length) {
+    const header = document.createElement('div');
+    header.className = 'sources-header';
+    header.textContent = 'Sources';
+    fl.appendChild(header);
+    loadedFiles.forEach((f, idx) => {
+      const row = document.createElement('div');
+      row.className = 'source-row';
+      const name = document.createElement('span');
+      name.className = 'source-name';
+      name.textContent = f.name;
+      name.title = f.name;
+      const count = document.createElement('span');
+      count.className = 'source-count';
+      count.textContent = f.points.length;
+      const del = document.createElement('button');
+      del.className = 'source-del';
+      del.title = `Remove ${f.name}`;
+      del.setAttribute('aria-label', `Remove ${f.name}`);
+      del.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+      del.addEventListener('click', () => removeSource(idx));
+      row.appendChild(name);
+      row.appendChild(count);
+      row.appendChild(del);
+      fl.appendChild(row);
+    });
+  }
+
+  document.getElementById('region-count').textContent = state.clusters.length;
+  const list = document.getElementById('cluster-list');
+  if (!state.clusters.length) { list.innerHTML = '<div class="empty">no regions</div>'; return; }
+  list.innerHTML = '';
+  state.clusters.forEach((c, idx) => {
+    const div = document.createElement('div');
+    div.className = 'cluster-item';
+    div.innerHTML = `
+      <div class="num">${String(idx+1).padStart(2,'0')}</div>
+      <div class="meta">
+        <div><span class="cluster-name" contenteditable="true" spellcheck="false">${escapeHtml(c.name)}</span></div>
+        <div class="coord">${c.center.lat.toFixed(2)}°, ${c.center.lon.toFixed(2)}°</div>
+      </div>
+      <div class="count">${c.points.length}</div>
+    `;
+    const nameEl = div.querySelector('.cluster-name');
+    // Don't trigger zoom when clicking the editable name
+    ['mousedown','click'].forEach(ev =>
+      nameEl.addEventListener(ev, e => e.stopPropagation()));
+    nameEl.addEventListener('blur', () => {
+      const v = nameEl.textContent.replace(/\s+/g, ' ').trim();
+      const next = v || c.name;
+      nameEl.textContent = next;
+      c.name = next;
+      renderClusterLabels();
+    });
+    nameEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter')      { e.preventDefault(); nameEl.blur(); }
+      else if (e.key === 'Escape'){ e.preventDefault(); nameEl.textContent = c.name; nameEl.blur(); }
+    });
+    div.addEventListener('click', () => zoomToCluster(c));
+    list.appendChild(div);
+  });
+}
+
+function zoomToCluster(cluster) {
+  const xy = projection([cluster.center.lon, cluster.center.lat]);
+  if (!xy) return;
+  const k = 4;
+  const w = mapContainer.clientWidth || innerWidth;
+  const h = mapContainer.clientHeight || innerHeight;
+  const transform = d3.zoomIdentity
+    .translate(w/2 - xy[0]*k, h/2 - xy[1]*k)
+    .scale(k);
+  svg.transition().duration(600).call(zoomBehavior.transform, transform);
+}
+
+/* ---------- TOAST ---------- */
+let toastTimer;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>toastEl.classList.remove('show'), 2400);
+}
+
+/* ---------- TOGGLES ---------- */
+document.getElementById('t-distances').addEventListener('click', e => {
+  state.showDistances = !state.showDistances;
+  e.currentTarget.classList.toggle('on', state.showDistances);
+  arcLayer.attr('display', state.showDistances ? null : 'none');
+  arcLabelLayer.attr('display', state.showDistances ? null : 'none');
+});
+document.getElementById('t-region-labels').addEventListener('click', e => {
+  state.showRegionLabels = !state.showRegionLabels;
+  e.currentTarget.classList.toggle('on', state.showRegionLabels);
+  renderClusterLabels();
+});
+document.getElementById('t-continents').addEventListener('click', e => {
+  state.showContinents = !state.showContinents;
+  e.currentTarget.classList.toggle('on', state.showContinents);
+  landLayer.attr('display', state.showContinents ? null : 'none');
+});
+
+/* ---------- PROJECTION SWITCH ---------- */
+(function populateProjectionSelect() {
+  const sel = document.getElementById('proj-select');
+  PROJECTION_GROUPS.forEach(g => {
+    // Filter to only projections actually exported on the d3 namespace
+    const available = g.items.filter(([key]) => typeof d3[key] === 'function');
+    if (!available.length) return;
+    const og = document.createElement('optgroup');
+    og.label = g.group;
+    available.forEach(([key, name]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = name;
+      if (key === state.projectionName) opt.selected = true;
+      og.appendChild(opt);
+    });
+    sel.appendChild(og);
+  });
+  sel.addEventListener('change', () => {
+    state.projectionName = sel.value;
+    projection = buildProjection(sel.value);
+    renderAll();
+    // Reset zoom on projection change so user sees the full new map
+    svg.call(zoomBehavior.transform, d3.zoomIdentity);
+  });
+})();
+
+/* ---------- RESIZE ---------- */
+let resizeTimer;
+addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => renderAll(), 120);
+});
+
+/* ---------- BOOT ---------- */
+async function boot() {
+  renderAll();
+  updatePanel();
+  loadLand().then(() => { if (state.landGeo) renderLand(); });
+  setTimeout(() => showToast('READY · LOAD OVERPASS EXPORT'), 600);
+}
+boot();
+
+})();  // end main IIFE
+</script>
+</body>
+</html>
