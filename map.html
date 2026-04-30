@@ -86,6 +86,19 @@
     stroke-width: 0.6;
     stroke-opacity: 0.45;
   }
+  .border-country {
+    fill: none;
+    stroke: var(--cyan);
+    stroke-width: 0.55;
+    stroke-opacity: 0.75;
+  }
+  .border-state {
+    fill: none;
+    stroke: var(--cyan-soft);
+    stroke-width: 0.35;
+    stroke-opacity: 0.6;
+    stroke-dasharray: 2 2;
+  }
 
   .arc {
     fill: none;
@@ -438,6 +451,8 @@
       <path id="graticule-eq" class="graticule graticule-equator" />
       <path id="graticule" class="graticule" />
       <g id="land-layer"></g>
+      <g id="state-border-layer"></g>
+      <g id="country-border-layer"></g>
       <g id="arc-layer"></g>
       <g id="cluster-layer"></g>
       <g id="point-layer"></g>
@@ -476,6 +491,10 @@
       <div class="ctrl-row">
         <span>Continents</span>
         <div class="toggle on" id="t-continents"></div>
+      </div>
+      <div class="ctrl-row">
+        <span>Borders</span>
+        <div class="toggle on" id="t-borders"></div>
       </div>
       <div class="ctrl-row">
         <span>Reset View</span>
@@ -531,8 +550,11 @@ const state = {
   showDistances: true,
   showRegionLabels: true,
   showContinents: true,
+  showBorders: true,
   projectionName: 'geoRobinson',
-  landGeo: null
+  landGeo: null,
+  countriesGeo: null,
+  statesGeo: null
 };
 const loadedFiles = [];
 
@@ -543,6 +565,8 @@ const sphereEl   = d3.select('#sphere');
 const gratEl     = d3.select('#graticule');
 const gratEqEl   = d3.select('#graticule-eq');
 const landLayer  = d3.select('#land-layer');
+const stateBorderLayer   = d3.select('#state-border-layer');
+const countryBorderLayer = d3.select('#country-border-layer');
 const arcLayer   = d3.select('#arc-layer');
 const clusterLayer = d3.select('#cluster-layer');
 const pointLayer = d3.select('#point-layer');
@@ -749,6 +773,9 @@ const zoomBehavior = d3.zoom()
     pointLayer.selectAll('circle.point-halo').attr('r', 6 / k);
     clusterLayer.selectAll('.cluster-buffer').attr('stroke-width', 0.8 * inv);
     arcLayer.selectAll('.arc').attr('stroke-width', 1 * inv);
+    landLayer.selectAll('.land').attr('stroke-width', 0.6 * inv);
+    countryBorderLayer.selectAll('.border-country').attr('stroke-width', 0.55 * inv);
+    stateBorderLayer.selectAll('.border-state').attr('stroke-width', 0.35 * inv);
     arcLabelLayer.selectAll('text')
       .style('font-size', (9 / k) + 'px')
       .style('stroke-width', 3 / k);
@@ -771,6 +798,8 @@ const EXPORT_CSS = `
 .graticule { fill: none; stroke: #1a2f4d; stroke-width: 0.5; stroke-opacity: 0.55; stroke-dasharray: 1 3; }
 .graticule-equator { stroke-opacity: 0.85; stroke-dasharray: none; stroke: #2a5078; }
 .land { fill: rgba(20,38,61,0.55); stroke: #5ee0ff; stroke-width: 0.6; stroke-opacity: 0.45; }
+.border-country { fill: none; stroke: #5ee0ff; stroke-width: 0.55; stroke-opacity: 0.75; }
+.border-state { fill: none; stroke: #2a7fa3; stroke-width: 0.35; stroke-opacity: 0.6; stroke-dasharray: 2 2; }
 .arc { fill: none; stroke: #fff2dd; stroke-width: 1; stroke-opacity: 0.7; }
 .arc-label { fill: #ffb347; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; font-weight: 500;
   paint-order: stroke; stroke: #03060c; stroke-width: 3; stroke-linejoin: round; text-anchor: middle; letter-spacing: 0.05em; }
@@ -824,22 +853,43 @@ function exportSVG() {
 
 document.getElementById('btn-export-svg').addEventListener('click', exportSVG);
 
-/* ---------- LAND DATA ---------- */
-async function loadLand() {
+/* ---------- GEO DATA ---------- */
+async function loadGeo() {
+  // countries-110m.json bundles both `land` (for the fill layer) and
+  // `countries` (for borders) in a single TopoJSON.
+  fetchJSON('./countries-110m.json').then(topo => {
+    if (!topo) return;
+    state.landGeo = topoToGeoJSON(topo, 'land');
+    state.countriesGeo = topoToGeoJSON(topo, 'countries');
+    renderLand();
+    renderCountryBorders();
+  });
+  // states-50m.json is a stripped Natural Earth admin_1 50m FeatureCollection;
+  // covers subnational data for US, Canada, Russia, China, India, Indonesia,
+  // Brazil, Australia, South Africa. Other countries have none.
+  fetchJSON('./states-50m.json').then(geo => {
+    if (!geo) return;
+    state.statesGeo = geo;
+    renderStateBorders();
+  });
+}
+
+async function fetchJSON(url) {
   try {
-    const res = await fetch('./land-110m.json');
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    state.landGeo = topoToGeoJSON(await res.json());
+    return await res.json();
   } catch(e) {
-    console.error('land load failed', e);
+    console.error(`fetch ${url} failed`, e);
+    return null;
   }
 }
 
-function topoToGeoJSON(topo) {
+function topoToGeoJSON(topo, objectName) {
   const arcs = topo.arcs;
   const tx = topo.transform;
-  const land = topo.objects && (topo.objects.land || topo.objects.countries);
-  if (!land) return null;
+  const obj = topo.objects && topo.objects[objectName];
+  if (!obj) return null;
   function decodeArc(idx) {
     const reverse = idx < 0;
     if (reverse) idx = ~idx;
@@ -867,14 +917,14 @@ function topoToGeoJSON(topo) {
     return null;
   }
   const features = [];
-  if (land.type === 'GeometryCollection') {
-    for (const g of land.geometries) {
+  if (obj.type === 'GeometryCollection') {
+    for (const g of obj.geometries) {
       const decoded = geomToGeoJSON(g);
-      if (decoded) features.push({ type:'Feature', geometry: decoded, properties:{} });
+      if (decoded) features.push({ type:'Feature', geometry: decoded, properties: g.properties || {} });
     }
   } else {
-    const decoded = geomToGeoJSON(land);
-    if (decoded) features.push({ type:'Feature', geometry: decoded, properties:{} });
+    const decoded = geomToGeoJSON(obj);
+    if (decoded) features.push({ type:'Feature', geometry: decoded, properties: obj.properties || {} });
   }
   return { type:'FeatureCollection', features };
 }
@@ -1030,6 +1080,8 @@ function renderAll() {
   fitProjection();
   renderBackground();
   renderLand();
+  renderStateBorders();
+  renderCountryBorders();
   renderArcs();
   renderClusters();
   renderPoints();
@@ -1056,6 +1108,26 @@ function renderLand() {
     .merge(sel)
     .attr('d', d => pathGen(d) || '');
   landLayer.attr('display', state.showContinents ? null : 'none');
+}
+
+function renderCountryBorders() {
+  if (!state.countriesGeo) { countryBorderLayer.selectAll('*').remove(); return; }
+  const sel = countryBorderLayer.selectAll('path').data(state.countriesGeo.features || []);
+  sel.exit().remove();
+  sel.enter().append('path').attr('class','border-country')
+    .merge(sel)
+    .attr('d', d => pathGen(d) || '');
+  countryBorderLayer.attr('display', state.showBorders ? null : 'none');
+}
+
+function renderStateBorders() {
+  if (!state.statesGeo) { stateBorderLayer.selectAll('*').remove(); return; }
+  const sel = stateBorderLayer.selectAll('path').data(state.statesGeo.features || []);
+  sel.exit().remove();
+  sel.enter().append('path').attr('class','border-state')
+    .merge(sel)
+    .attr('d', d => pathGen(d) || '');
+  stateBorderLayer.attr('display', state.showBorders ? null : 'none');
 }
 
 function renderArcs() {
@@ -1363,6 +1435,12 @@ document.getElementById('t-continents').addEventListener('click', e => {
   e.currentTarget.classList.toggle('on', state.showContinents);
   landLayer.attr('display', state.showContinents ? null : 'none');
 });
+document.getElementById('t-borders').addEventListener('click', e => {
+  state.showBorders = !state.showBorders;
+  e.currentTarget.classList.toggle('on', state.showBorders);
+  countryBorderLayer.attr('display', state.showBorders ? null : 'none');
+  stateBorderLayer.attr('display', state.showBorders ? null : 'none');
+});
 
 /* ---------- PROJECTION SWITCH ---------- */
 (function populateProjectionSelect() {
@@ -1402,7 +1480,7 @@ addEventListener('resize', () => {
 async function boot() {
   renderAll();
   updatePanel();
-  loadLand().then(() => { if (state.landGeo) renderLand(); });
+  loadGeo();
   setTimeout(() => showToast('READY · LOAD OVERPASS EXPORT'), 600);
 }
 boot();
