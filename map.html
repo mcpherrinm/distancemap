@@ -221,10 +221,33 @@
     color: var(--ink-fade); text-transform: uppercase;
     margin-bottom: 6px;
   }
-  .proj-select-wrap {
-    position: relative;
+  .proj-row {
+    display: flex;
+    gap: 4px;
+    align-items: stretch;
     margin-top: 6px;
   }
+  .proj-select-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .proj-nav { display: flex; gap: 2px; }
+  .proj-nav-btn {
+    width: 22px;
+    background: var(--bg-1);
+    color: var(--cyan);
+    border: 1px solid var(--line);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .proj-nav-btn:hover { border-color: var(--cyan-soft); color: var(--ink); }
+  .proj-nav-btn:active { background: rgba(94,224,255,0.1); }
+  .proj-nav-btn:focus { outline: none; border-color: var(--amber); color: var(--amber); }
   .proj-select {
     width: 100%;
     appearance: none;
@@ -473,9 +496,16 @@
 
     <div class="proj-switch">
       <div class="lbl">Projection</div>
-      <div class="proj-select-wrap">
-        <select id="proj-select" class="proj-select"></select>
-        <span class="proj-select-arrow">▾</span>
+      <div class="proj-row">
+        <div class="proj-select-wrap">
+          <select id="proj-select" class="proj-select"></select>
+          <span class="proj-select-arrow">▾</span>
+        </div>
+        <div class="proj-nav">
+          <button id="proj-prev" class="proj-nav-btn" title="Previous projection" aria-label="Previous projection">↓</button>
+          <button id="proj-rand" class="proj-nav-btn" title="Random projection" aria-label="Random projection">?</button>
+          <button id="proj-next" class="proj-nav-btn" title="Next projection" aria-label="Next projection">↑</button>
+        </div>
       </div>
     </div>
 
@@ -1467,6 +1497,20 @@ document.getElementById('t-borders').addEventListener('click', e => {
     // Reset zoom on projection change so user sees the full new map
     svg.call(zoomBehavior.transform, d3.zoomIdentity);
   });
+
+  const stepProjection = (delta) => {
+    const opts = Array.from(sel.options);
+    if (!opts.length) return;
+    const i = opts.findIndex(o => o.value === sel.value);
+    const next = delta === 'random'
+      ? Math.floor(Math.random() * opts.length)
+      : (i + delta + opts.length) % opts.length;
+    sel.value = opts[next].value;
+    sel.dispatchEvent(new Event('change'));
+  };
+  document.getElementById('proj-prev').addEventListener('click', () => stepProjection(-1));
+  document.getElementById('proj-next').addEventListener('click', () => stepProjection(1));
+  document.getElementById('proj-rand').addEventListener('click', () => stepProjection('random'));
 })();
 
 /* ---------- RESIZE ---------- */
