@@ -80,6 +80,12 @@
     stroke: var(--line);
     stroke-width: 1;
   }
+  .daylight {
+    fill: #fff;
+    fill-opacity: 0.02;
+    stroke: none;
+    pointer-events: none;
+  }
   .graticule {
     fill: none;
     stroke: var(--line);
@@ -730,6 +736,7 @@
   <svg id="map-svg" preserveAspectRatio="xMidYMid meet">
     <g id="zoom-root">
       <path id="sphere" class="sphere-bg" />
+      <path id="daylight" class="daylight" />
       <path id="graticule-eq" class="graticule graticule-equator" />
       <path id="graticule" class="graticule" />
       <g id="land-layer"></g>
@@ -1007,6 +1014,7 @@ const mapContainer = document.getElementById('map-container');
 const svg        = d3.select('#map-svg');
 const zoomRoot   = d3.select('#zoom-root');
 const sphereEl   = d3.select('#sphere');
+const daylightEl = d3.select('#daylight');
 const gratEl     = d3.select('#graticule');
 const gratEqEl   = d3.select('#graticule-eq');
 const landLayer  = d3.select('#land-layer');
@@ -1337,6 +1345,7 @@ document.getElementById('btn-reset-view').addEventListener('click', () => {
 const EXPORT_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
 .sphere-bg { fill: rgba(8,18,32,0.6); stroke: #1a2f4d; stroke-width: 1; }
+.daylight { fill: #fff; fill-opacity: 0.02; stroke: none; }
 .graticule { fill: none; stroke: #1a2f4d; stroke-width: 0.5; stroke-opacity: 0.55; stroke-dasharray: 1 3; }
 .graticule-equator { stroke-opacity: 0.85; stroke-dasharray: none; stroke: #2a5078; }
 .land { fill: rgba(20,38,61,0.55); stroke: #5ee0ff; stroke-width: 0.6; stroke-opacity: 0.45; }
@@ -1690,6 +1699,34 @@ function renderBackground() {
     type: 'LineString',
     coordinates: Array.from({length:361}, (_,i) => [i-180, 0])
   }) || '');
+  renderDaylight();
+}
+
+// Approximate subsolar point — the location on Earth where the sun is
+// directly overhead — using a low-precision solar declination + equation
+// of time model. Plenty good for a decorative day/night wash; off by under
+// half a degree vs precise ephemerides.
+function subsolarPoint(date) {
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const N = (date.getTime() - start) / 86400000;
+  const decl = 23.44 * Math.sin(2 * Math.PI * (N - 81) / 365);
+  const B    = 2 * Math.PI * (N - 81) / 365;
+  const eot  = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+  const utcHour = date.getUTCHours()
+                + date.getUTCMinutes() / 60
+                + date.getUTCSeconds() / 3600;
+  const solarHourGmt = utcHour + eot / 60;
+  let lon = -((solarHourGmt - 12) * 15);
+  lon = ((lon + 540) % 360) - 180;
+  return { lat: decl, lon };
+}
+
+function renderDaylight() {
+  if (typeof d3.geoCircle !== 'function') { daylightEl.attr('d', ''); return; }
+  const sub = subsolarPoint(new Date());
+  // 90° geo-radius cap = the lit hemisphere; the projection paints the rest.
+  const lit = d3.geoCircle().center([sub.lon, sub.lat]).radius(90)();
+  daylightEl.attr('d', pathGen(lit) || '');
 }
 
 function renderLand() {
@@ -2553,6 +2590,9 @@ async function boot() {
       showToast('READY · OPEN OVERPASS QUERY OR DROP A FILE');
     }
   }, 600);
+  // Nudge the daylight wash forward over time so a left-open tab doesn't show
+  // a frozen day/night line. 10 minutes ≈ 2.5° of subsolar motion.
+  setInterval(renderDaylight, 10 * 60 * 1000);
 }
 boot();
 
