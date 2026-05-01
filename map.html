@@ -67,6 +67,14 @@
   }
   #map-svg:active { cursor: grabbing; }
 
+  /* Strokes inside the zoom-root are screen-space — they hold their CSS
+     stroke-width regardless of zoom, instead of being scaled by the parent
+     transform. This keeps lines, dashes, and text outlines visually stable
+     across the entire zoom range. Don't try to counter-scale stroke-width
+     in the zoom handler — stylesheet rules silently override
+     `selection.attr('stroke-width')` per the SVG 2 cascade. */
+  #zoom-root * { vector-effect: non-scaling-stroke; }
+
   .sphere-bg {
     fill: rgba(8, 18, 32, 0.6);
     stroke: var(--line);
@@ -796,22 +804,13 @@ const zoomBehavior = d3.zoom()
   .on('zoom', (ev) => {
     zoomRoot.attr('transform', ev.transform);
     const k = ev.transform.k;
-    const inv = 1 / Math.sqrt(k);
-    // Dots use pure 1/k so they stay a constant pixel size as you zoom — sqrt
-    // scaling let them creep up by √k on screen, which read as "getting bigger."
+    // Strokes are held screen-space by `vector-effect: non-scaling-stroke`
+    // (declared on #zoom-root *), so the zoom handler only counter-scales
+    // sizes the browser can't hold for us: circle radii and font-size.
     pointLayer.selectAll('circle.point-dot').attr('r', 3 / k);
     pointLayer.selectAll('circle.point-halo').attr('r', 6 / k);
-    clusterLayer.selectAll('.cluster-buffer').attr('stroke-width', 0.8 * inv);
-    arcLayer.selectAll('.arc').attr('stroke-width', 1 * inv);
-    landLayer.selectAll('.land').attr('stroke-width', 0.6 * inv);
-    countryBorderLayer.selectAll('.border-country').attr('stroke-width', 0.55 * inv);
-    stateBorderLayer.selectAll('.border-state').attr('stroke-width', 0.35 * inv);
-    arcLabelLayer.selectAll('text')
-      .style('font-size', (9 / k) + 'px')
-      .style('stroke-width', 3 / k);
-    clusterLabelLayer.selectAll('text')
-      .style('font-size', (10 / k) + 'px')
-      .style('stroke-width', 3 / k);
+    arcLabelLayer.selectAll('text').style('font-size', (9 / k) + 'px');
+    clusterLabelLayer.selectAll('text').style('font-size', (10 / k) + 'px');
   });
 svg.call(zoomBehavior);
 
@@ -1253,7 +1252,6 @@ function renderClusterLabels() {
       .attr('y', xy[1])
       .attr('dy', '1.1em')
       .style('font-size', (10 / k) + 'px')
-      .style('stroke-width', 3 / k)
       .text(c.name);
   }
 }
@@ -1272,7 +1270,6 @@ function renderArcLabels() {
       .attr('class','arc-label')
       .attr('x', xy[0]).attr('y', xy[1] - 2)
       .style('font-size', (9 / k) + 'px')
-      .style('stroke-width', 3 / k)
       .text(formatKm(pair.distKm));
   }
 }
