@@ -325,6 +325,55 @@
     box-shadow: 0 0 6px var(--amber-glow);
   }
 
+  .rot-section { margin-top: 16px; }
+  .rot-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--ink-dim); margin-bottom: 8px;
+  }
+  .rot-head .hint {
+    font-size: 9px; letter-spacing: 0.18em; color: var(--ink-fade);
+    text-transform: none;
+  }
+  .rot-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 44px;
+    gap: 8px; align-items: center;
+    font-size: 10px; letter-spacing: 0.18em;
+    color: var(--ink-dim);
+    padding: 2px 0;
+  }
+  .rot-row .lab { text-transform: uppercase; }
+  .rot-row .val {
+    color: var(--amber); font-variant-numeric: tabular-nums;
+    text-align: right; font-size: 10px; letter-spacing: 0;
+  }
+  .rot-row input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 2px; padding: 0; margin: 0;
+    background: var(--line); cursor: pointer;
+    outline: none;
+  }
+  .rot-row input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 10px; height: 14px;
+    background: var(--cyan); border: 1px solid var(--cyan-soft);
+    cursor: grab;
+  }
+  .rot-row input[type=range]::-moz-range-thumb {
+    width: 10px; height: 14px;
+    background: var(--cyan); border: 1px solid var(--cyan-soft);
+    cursor: grab; border-radius: 0;
+  }
+  .rot-row input[type=range]:focus::-webkit-slider-thumb {
+    background: var(--amber); border-color: var(--amber);
+    box-shadow: 0 0 6px var(--amber-glow);
+  }
+  .rot-row input[type=range]:focus::-moz-range-thumb {
+    background: var(--amber); border-color: var(--amber);
+    box-shadow: 0 0 6px var(--amber-glow);
+  }
+
   .sources-header {
     letter-spacing: 0.2em;
     text-transform: uppercase;
@@ -517,6 +566,34 @@
       </div>
     </div>
 
+    <div class="rot-section">
+      <div class="rot-head">
+        <span>Rotation</span>
+        <div class="proj-nav">
+          <button id="rot-rand"  class="proj-nav-btn" title="Randomize rotation" aria-label="Randomize rotation">?</button>
+          <button id="rot-reset" class="proj-nav-btn" title="Reset rotation"     aria-label="Reset rotation">⟲</button>
+        </div>
+      </div>
+      <div class="rot-row">
+        <span class="lab">λ yaw</span>
+        <input type="range" id="rot-l" min="-180" max="180" step="1" value="0">
+        <span class="val" id="rot-l-val">0°</span>
+      </div>
+      <div class="rot-row">
+        <span class="lab">φ pitch</span>
+        <input type="range" id="rot-p" min="-90" max="90" step="1" value="0">
+        <span class="val" id="rot-p-val">0°</span>
+      </div>
+      <div class="rot-row">
+        <span class="lab">γ roll</span>
+        <input type="range" id="rot-g" min="-180" max="180" step="1" value="0">
+        <span class="val" id="rot-g-val">0°</span>
+      </div>
+      <div class="rot-head" style="margin: 6px 0 0;">
+        <span class="hint">alt-drag map to rotate</span>
+      </div>
+    </div>
+
     <div class="controls">
       <div class="ctrl-row">
         <span>Distances</span>
@@ -590,10 +667,17 @@ const state = {
   showContinents: true,
   showBorders: true,
   projectionName: 'geoRobinson',
+  // [λ, φ, γ] passed straight to projection.rotate(). Seeded from each
+  // projection's natural orientation when the projection is swapped, then
+  // adjusted by the rotation sliders or alt-drag on the map.
+  rotation: [0, 0, 0],
   landGeo: null,
   countriesGeo: null,
   statesGeo: null
 };
+
+const wrap180 = (x) => ((x + 180) % 360 + 360) % 360 - 180;
+const clampPhi = (x) => Math.max(-90, Math.min(90, x));
 const loadedFiles = [];
 
 const mapContainer = document.getElementById('map-container');
@@ -772,8 +856,23 @@ function buildProjection(key) {
   return proj;
 }
 
+// Capture a freshly-built projection's natural rotation (geoAzimuthalEquidistant
+// looks down on the north pole, geoSatellite is normalized, etc.) and treat
+// it as the user's current rotation. From there, sliders and alt-drag adjust.
+function adoptProjection(key) {
+  state.projectionName = key;
+  projection = buildProjection(key);
+  const r = projection.rotate ? projection.rotate() : [0, 0, 0];
+  state.rotation = [r[0] || 0, r[1] || 0, r[2] || 0];
+  pathGen = d3.geoPath(projection);
+}
+
 let projection = buildProjection(state.projectionName);
 let pathGen = d3.geoPath(projection);
+{
+  const r = projection.rotate ? projection.rotate() : [0, 0, 0];
+  state.rotation = [r[0] || 0, r[1] || 0, r[2] || 0];
+}
 
 function fitProjection() {
   const w = mapContainer.clientWidth || innerWidth;
@@ -801,6 +900,11 @@ function fitProjection() {
 /* ---------- ZOOM ---------- */
 const zoomBehavior = d3.zoom()
   .scaleExtent([0.5, 40])
+  // Default filter excludes ctrl + secondary clicks; we also exclude alt so
+  // alt-drag belongs entirely to the rotate-drag behavior below.
+  .filter((event) => (!event.ctrlKey || event.type === 'wheel')
+                  && !event.button
+                  && !event.altKey)
   .on('zoom', (ev) => {
     zoomRoot.attr('transform', ev.transform);
     const k = ev.transform.k;
@@ -813,6 +917,92 @@ const zoomBehavior = d3.zoom()
     clusterLabelLayer.selectAll('text').style('font-size', (10 / k) + 'px');
   });
 svg.call(zoomBehavior);
+
+/* ---------- ROTATION ---------- */
+// Push state.rotation into the projection and re-render paths. Skips
+// fitProjection so dragging a slider (or alt-dragging the map) doesn't
+// re-scale the canvas underfoot — clipped projections (Mercator etc.)
+// otherwise breathe in and out as rotation changes their projected bounds.
+function applyRotation() {
+  projection.rotate(state.rotation);
+  rerenderProjection();
+}
+
+const rotInputs = {
+  l: document.getElementById('rot-l'),
+  p: document.getElementById('rot-p'),
+  g: document.getElementById('rot-g')
+};
+const rotVals = {
+  l: document.getElementById('rot-l-val'),
+  p: document.getElementById('rot-p-val'),
+  g: document.getElementById('rot-g-val')
+};
+
+function syncRotationControls() {
+  // Sliders are clamped to [-180,180] / [-90,90]; if the projection's natural
+  // rotation lies outside (e.g. anything wrapped past ±180), normalize first.
+  state.rotation = [
+    wrap180(state.rotation[0]),
+    clampPhi(state.rotation[1]),
+    wrap180(state.rotation[2])
+  ];
+  rotInputs.l.value = Math.round(state.rotation[0]);
+  rotInputs.p.value = Math.round(state.rotation[1]);
+  rotInputs.g.value = Math.round(state.rotation[2]);
+  rotVals.l.textContent = `${Math.round(state.rotation[0])}°`;
+  rotVals.p.textContent = `${Math.round(state.rotation[1])}°`;
+  rotVals.g.textContent = `${Math.round(state.rotation[2])}°`;
+}
+
+rotInputs.l.addEventListener('input', () => {
+  state.rotation[0] = +rotInputs.l.value;
+  rotVals.l.textContent = `${Math.round(state.rotation[0])}°`;
+  applyRotation();
+});
+rotInputs.p.addEventListener('input', () => {
+  state.rotation[1] = +rotInputs.p.value;
+  rotVals.p.textContent = `${Math.round(state.rotation[1])}°`;
+  applyRotation();
+});
+rotInputs.g.addEventListener('input', () => {
+  state.rotation[2] = +rotInputs.g.value;
+  rotVals.g.textContent = `${Math.round(state.rotation[2])}°`;
+  applyRotation();
+});
+
+document.getElementById('rot-rand').addEventListener('click', () => {
+  state.rotation = [
+    Math.round(Math.random() * 360 - 180),
+    Math.round(Math.random() * 180 - 90),
+    Math.round(Math.random() * 360 - 180)
+  ];
+  syncRotationControls();
+  applyRotation();
+});
+
+document.getElementById('rot-reset').addEventListener('click', () => {
+  state.rotation = [0, 0, 0];
+  syncRotationControls();
+  applyRotation();
+});
+
+// Alt-drag rotates the globe in λ (yaw) and φ (pitch). Roll is slider-only.
+// Sensitivity: ~0.5° per pixel — a full panel-width drag spins the globe
+// roughly once around. d3.drag's filter coexists with the zoom behavior
+// because the zoom filter explicitly excludes alt-key events.
+const rotateDrag = d3.drag()
+  .filter((event) => event.altKey && !event.button)
+  .on('start', (event) => { event.sourceEvent.preventDefault(); })
+  .on('drag', (event) => {
+    state.rotation[0] = wrap180(state.rotation[0] + event.dx * 0.5);
+    state.rotation[1] = clampPhi(state.rotation[1] - event.dy * 0.5);
+    syncRotationControls();
+    applyRotation();
+  });
+svg.call(rotateDrag);
+
+syncRotationControls();
 
 document.getElementById('btn-reset-view').addEventListener('click', () => {
   svg.transition().duration(450).call(zoomBehavior.transform, d3.zoomIdentity);
@@ -1107,6 +1297,14 @@ function rebuildClusters() {
 /* ---------- RENDER ---------- */
 function renderAll() {
   fitProjection();
+  rerenderProjection();
+  svg.call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+// Re-run path generation against the current projection (assumes scale/translate
+// are already correct). Used when only the rotation changes — skipping
+// fitProjection avoids scale jitter mid-rotation on clipped projections.
+function rerenderProjection() {
   renderBackground();
   renderLand();
   renderStateBorders();
@@ -1116,7 +1314,6 @@ function renderAll() {
   renderPoints();
   renderArcLabels();
   renderClusterLabels();
-  svg.call(zoomBehavior.transform, d3.zoomIdentity);
 }
 
 function renderBackground() {
@@ -1488,8 +1685,8 @@ document.getElementById('t-borders').addEventListener('click', e => {
     sel.appendChild(og);
   });
   sel.addEventListener('change', () => {
-    state.projectionName = sel.value;
-    projection = buildProjection(sel.value);
+    adoptProjection(sel.value);
+    syncRotationControls();
     renderAll();
     // Reset zoom on projection change so user sees the full new map
     svg.call(zoomBehavior.transform, d3.zoomIdentity);
