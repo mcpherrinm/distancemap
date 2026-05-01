@@ -1971,6 +1971,33 @@ function setQueryStatus(msg, isErr) {
   queryStatus.classList.toggle('err', !!isErr);
 }
 
+// Render a status line plus an HTML body (e.g. the Overpass error page) into
+// the status pane. Uses the native HTML Sanitizer API (Element.setHTML) when
+// available so script/event-handler/javascript: vectors are stripped by the
+// platform; otherwise falls back to plain text so the user still sees the
+// full message — with tags visible — and we never render untrusted markup.
+function setQueryStatusHtml(prefix, html, isErr) {
+  queryStatus.textContent = '';
+  queryStatus.classList.toggle('err', !!isErr);
+  queryStatus.appendChild(document.createTextNode(prefix));
+  if (!html) return;
+  // Trim full-document scaffolding (doctype, <title>) by narrowing to body.
+  // DOMParser does not execute scripts or fetch subresources.
+  let inner = html;
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    if (doc.body) inner = doc.body.innerHTML;
+  } catch (_) { /* keep original */ }
+  queryStatus.appendChild(document.createTextNode('\n'));
+  if (typeof Element.prototype.setHTML === 'function') {
+    const wrap = document.createElement('div');
+    wrap.setHTML(inner);
+    queryStatus.appendChild(wrap);
+  } else {
+    queryStatus.appendChild(document.createTextNode(inner));
+  }
+}
+
 function openQueryDialog() {
   setQueryStatus('', false);
   // Replenish the timestamp default if the user cleared it; otherwise leave
@@ -2086,10 +2113,11 @@ async function runOverpassQuery() {
     });
     const text = await res.text();
     if (!res.ok) {
-      // Overpass error bodies are HTML — strip tags but keep the full message
-      // so users can see the actual cause (often a multi-line query parse error).
-      const body = text.replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n').trim();
-      throw new Error(`HTTP ${res.status}${body ? '\n' + body : ''}`);
+      // Overpass error bodies are HTML; pass the raw markup through so
+      // setQueryStatusHtml can render it (sanitized) or show as plain text.
+      const err = new Error(`HTTP ${res.status}`);
+      err.htmlBody = text;
+      throw err;
     }
     let json;
     try { json = JSON.parse(text); }
@@ -2107,7 +2135,11 @@ async function runOverpassQuery() {
     closeQueryDialog();
     showToast(`success · +${incoming.length} points`);
   } catch (e) {
-    setQueryStatus(e.message || 'query failed', true);
+    if (e && e.htmlBody !== undefined) {
+      setQueryStatusHtml(e.message || 'query failed', e.htmlBody, true);
+    } else {
+      setQueryStatus(e.message || 'query failed', true);
+    }
   } finally {
     queryBtn.disabled = false;
   }
