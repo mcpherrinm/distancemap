@@ -679,6 +679,32 @@ const state = {
 const wrap180 = (x) => ((x + 180) % 360 + 360) % 360 - 180;
 const clampPhi = (x) => Math.max(-90, Math.min(90, x));
 const loadedFiles = [];
+const STORAGE_KEY = 'distancemap.loadedFiles.v1';
+
+function persistLoadedFiles() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedFiles));
+  } catch(e) {
+    console.warn('persist failed', e);
+    showToast('STORAGE FULL · CHANGES NOT SAVED');
+  }
+}
+
+function restoreLoadedFiles() {
+  let raw;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch(e) { return; }
+  if (!raw) return;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch(e) { localStorage.removeItem(STORAGE_KEY); return; }
+  if (!Array.isArray(parsed)) return;
+  for (const f of parsed) {
+    if (f && typeof f.name === 'string' && Array.isArray(f.points)) {
+      loadedFiles.push({ name: f.name, points: f.points });
+    }
+  }
+  recomputeFromSources();
+  rebuildClusters();
+}
 
 const mapContainer = document.getElementById('map-container');
 const svg        = d3.select('#map-svg');
@@ -1510,6 +1536,7 @@ async function ingestFiles(fileList) {
   }
   recomputeFromSources();
   rebuildClusters();
+  persistLoadedFiles();
   renderAll();
   updatePanel();
   const errSuffix = errors.length ? ` · ${errors.length} ERR` : '';
@@ -1535,6 +1562,7 @@ function removeSource(idx) {
   const removed = loadedFiles.splice(idx, 1)[0];
   recomputeFromSources();
   rebuildClusters();
+  persistLoadedFiles();
   renderAll();
   updatePanel();
   showToast(`removed ${removed.name} · ${state.points.length} points · ${state.clusters.length} regions`);
@@ -1716,10 +1744,17 @@ addEventListener('resize', () => {
 
 /* ---------- BOOT ---------- */
 async function boot() {
+  restoreLoadedFiles();
   renderAll();
   updatePanel();
   loadGeo();
-  setTimeout(() => showToast('READY · LOAD OVERPASS EXPORT'), 600);
+  setTimeout(() => {
+    if (loadedFiles.length) {
+      showToast(`READY · ${state.points.length} points · ${state.clusters.length} regions restored`);
+    } else {
+      showToast('READY · LOAD OVERPASS EXPORT');
+    }
+  }, 600);
 }
 boot();
 
