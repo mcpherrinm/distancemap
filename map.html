@@ -336,6 +336,15 @@
     color: var(--ink-fade); border-color: var(--line);
     cursor: wait; background: transparent;
   }
+  .query-demo {
+    background: transparent; color: var(--cyan);
+    border: 1px solid var(--cyan-soft);
+    font-family: inherit; font-size: 10px;
+    letter-spacing: 0.25em; text-transform: uppercase;
+    padding: 6px 14px; cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .query-demo:hover { background: rgba(94,224,255,0.08); border-color: var(--cyan); }
   .query-status {
     font-size: 10px; color: var(--ink-fade);
     letter-spacing: 0.05em;
@@ -851,6 +860,7 @@
     </label>
     <div class="query-dialog-foot">
       <span id="query-status" class="query-status"></span>
+      <button type="button" id="query-demo" class="query-demo">Load Demo</button>
       <button type="button" id="query-run" class="query-run">Run Query</button>
     </div>
   </div>
@@ -2008,6 +2018,7 @@ const queryInput   = document.getElementById('query-input');
 const queryUrlInp  = document.getElementById('query-url');
 const queryNameInp = document.getElementById('query-name');
 const queryBtn     = document.getElementById('query-run');
+const queryDemoBtn = document.getElementById('query-demo');
 const queryStatus  = document.getElementById('query-status');
 const openQueryBtn  = document.getElementById('open-query');
 const closeQueryBtn = document.getElementById('query-dialog-close');
@@ -2223,6 +2234,16 @@ async function runOverpassQuery() {
 }
 
 queryBtn.addEventListener('click', runOverpassQuery);
+queryDemoBtn.addEventListener('click', () => {
+  queryInput.value = DEFAULT_QUERY;
+  queryUrlInp.value = DEFAULT_QUERY_URL;
+  // Programmatic value assignment doesn't fire 'input', so persistField()
+  // wouldn't see the change — dispatch one explicitly.
+  queryInput.dispatchEvent(new Event('input'));
+  queryUrlInp.dispatchEvent(new Event('input'));
+  setQueryStatus('demo query loaded', false);
+  queryInput.focus();
+});
 queryInput.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
