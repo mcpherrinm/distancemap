@@ -340,7 +340,9 @@
     font-size: 10px; color: var(--ink-fade);
     letter-spacing: 0.05em;
     flex: 1;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap; word-break: break-word;
   }
   .query-status.err { color: var(--warn); }
 
@@ -1991,16 +1993,92 @@ queryDialog.addEventListener('click', (e) => {
   if (e.target === queryDialog) closeQueryDialog();
 });
 
+// Overpass Turbo–style {{geocodeArea:NAME}} / {{geocodeId:}} / {{geocodeBbox:}} /
+// {{geocodeCoords:}} templates aren't understood by the Overpass server itself.
+// Resolve them via Nominatim before submitting, so users can paste queries
+// straight from overpass-turbo.eu without rewriting them.
+const GEOCODE_RE = /\{\{geocode(Area|Id|Bbox|Coords)\s*:\s*([^}]+?)\s*\}\}/g;
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const GEOCODE_CACHE_KEY = 'distancemap:geocode-cache';
+const NOMINATIM_THROTTLE_MS = 1100; // Nominatim usage policy: max 1 req/sec.
+
+function loadGeocodeCache() {
+  try { return JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveGeocodeCache(cache) {
+  try { localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache)); } catch {}
+}
+
+async function nominatimLookup(name) {
+  const u = `${NOMINATIM_URL}?format=json&limit=10&q=${encodeURIComponent(name)}`;
+  const res = await fetch(u, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`Nominatim HTTP ${res.status} for "${name}"`);
+  const data = await res.json();
+  if (!Array.isArray(data) || !data.length) throw new Error(`Nominatim: no results for "${name}"`);
+  // Prefer relation (admin boundaries), then way, then first result.
+  const pick = data.find(d => d.osm_type === 'relation')
+            || data.find(d => d.osm_type === 'way')
+            || data[0];
+  return {
+    osm_type: pick.osm_type,
+    osm_id: Number(pick.osm_id),
+    lat: pick.lat,
+    lon: pick.lon,
+    boundingbox: pick.boundingbox,
+  };
+}
+
+function geocodeReplacement(kind, name, r) {
+  if (kind === 'Id') {
+    if (r.osm_type === 'relation') return String(3600000000 + r.osm_id);
+    if (r.osm_type === 'way')      return String(2400000000 + r.osm_id);
+    return String(r.osm_id);
+  }
+  if (kind === 'Area') {
+    if (r.osm_type === 'relation') return `area(${3600000000 + r.osm_id})`;
+    if (r.osm_type === 'way')      return `area(${2400000000 + r.osm_id})`;
+    throw new Error(`"${name}" resolved to a node — not an area`);
+  }
+  if (kind === 'Bbox') {
+    // Nominatim returns [south, north, west, east] as strings; Overpass wants s,w,n,e.
+    const [s, n, w, e] = r.boundingbox.map(Number);
+    return `${s},${w},${n},${e}`;
+  }
+  if (kind === 'Coords') return `${r.lat},${r.lon}`;
+  return '';
+}
+
+async function expandTemplates(query) {
+  const matches = [...query.matchAll(GEOCODE_RE)];
+  if (!matches.length) return query;
+  const cache = loadGeocodeCache();
+  const names = [...new Set(matches.map(m => m[2].trim()))];
+  let firstLookup = true;
+  for (const name of names) {
+    if (cache[name]) continue;
+    if (!firstLookup) await new Promise(r => setTimeout(r, NOMINATIM_THROTTLE_MS));
+    firstLookup = false;
+    setQueryStatus(`geocoding "${name}"…`, false);
+    cache[name] = await nominatimLookup(name);
+    saveGeocodeCache(cache);
+  }
+  return query.replace(GEOCODE_RE, (_, kind, rawName) => {
+    return geocodeReplacement(kind, rawName.trim(), cache[rawName.trim()]);
+  });
+}
+
 async function runOverpassQuery() {
-  const q    = queryInput.value.trim();
+  const rawQ = queryInput.value.trim();
   const url  = queryUrlInp.value.trim();
   const name = queryNameInp.value.trim();
-  if (!name) { setQueryStatus('name required', true); queryNameInp.focus(); return; }
-  if (!q)    { setQueryStatus('empty query', true); return; }
-  if (!url)  { setQueryStatus('endpoint URL required', true); return; }
+  if (!name)  { setQueryStatus('name required', true); queryNameInp.focus(); return; }
+  if (!rawQ)  { setQueryStatus('empty query', true); return; }
+  if (!url)   { setQueryStatus('endpoint URL required', true); return; }
   queryBtn.disabled = true;
-  setQueryStatus('querying overpass…', false);
   try {
+    const q = await expandTemplates(rawQ);
+    setQueryStatus('querying overpass…', false);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -2008,9 +2086,10 @@ async function runOverpassQuery() {
     });
     const text = await res.text();
     if (!res.ok) {
-      // Overpass error bodies are HTML-ish — strip tags for a brief snippet
-      const snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
-      throw new Error(`HTTP ${res.status}${snippet ? ': ' + snippet : ''}`);
+      // Overpass error bodies are HTML — strip tags but keep the full message
+      // so users can see the actual cause (often a multi-line query parse error).
+      const body = text.replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n').trim();
+      throw new Error(`HTTP ${res.status}${body ? '\n' + body : ''}`);
     }
     let json;
     try { json = JSON.parse(text); }
@@ -2025,8 +2104,8 @@ async function runOverpassQuery() {
     persistLoadedFiles();
     renderAll();
     updatePanel();
-    setQueryStatus(`+${incoming.length} points`, false);
-    showToast(`+${incoming.length} · ${state.points.length} points · ${state.clusters.length} regions`);
+    closeQueryDialog();
+    showToast(`success · +${incoming.length} points`);
   } catch (e) {
     setQueryStatus(e.message || 'query failed', true);
   } finally {
