@@ -1562,7 +1562,7 @@ function clusterByDistance(points, maxKm) {
     for (const p of pts) maxD = Math.max(maxD, haversineKm(center, p));
     clusters.push({
       center, points: pts,
-      name: regionLabel(center),
+      name: regionLabel(center, pts),
       radiusKm: Math.max(60, Math.min(maxD + 30, maxKm))
     });
   }
@@ -1570,12 +1570,38 @@ function clusterByDistance(points, maxKm) {
   return clusters;
 }
 
-// Look up the political region a point falls in, using the loaded basemap
-// data. Prefers state/province (Natural Earth admin_1, 50m — covers 9
-// federations) over country (admin_0, 110m). Falls back to lat/lon when
-// the geo data isn't loaded yet or the point is at sea.
-function regionLabel({lat, lon}) {
-  const pt = [lon, lat];
+// Most-frequent non-empty value of `key` across the points' tags, or null.
+function mostFrequentTag(points, key) {
+  if (!points || !points.length) return null;
+  const counts = new Map();
+  for (const p of points) {
+    const v = p.tags && p.tags[key];
+    if (typeof v === 'string' && v.trim()) {
+      const t = v.trim();
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  let best = null, bestN = 0;
+  for (const [t, n] of counts) {
+    if (n > bestN) { bestN = n; best = t; }
+  }
+  return best;
+}
+
+// Pick a label for a cluster. Order of preference:
+//   1. Most frequent addr:state across the cluster's points
+//   2. Most frequent addr:country across the cluster's points
+//   3. State/province polygon hit (Natural Earth admin_1, 50m — covers 9
+//      federations) at the cluster center
+//   4. Country polygon hit (admin_0, 110m) at the cluster center
+//   5. Lat/lon fallback (used while geo data is still loading or for
+//      offshore clusters)
+function regionLabel(center, points) {
+  const tagState   = mostFrequentTag(points, 'addr:state');
+  if (tagState)   return tagState;
+  const tagCountry = mostFrequentTag(points, 'addr:country');
+  if (tagCountry) return tagCountry;
+  const pt = [center.lon, center.lat];
   if (state.statesGeo && typeof d3.geoContains === 'function') {
     for (const f of state.statesGeo.features) {
       if (f.properties && f.properties.name && d3.geoContains(f, pt)) {
@@ -1590,9 +1616,9 @@ function regionLabel({lat, lon}) {
       }
     }
   }
-  const ns = lat >= 0 ? 'N' : 'S';
-  const ew = lon >= 0 ? 'E' : 'W';
-  return `${Math.abs(lat).toFixed(1)}°${ns} ${Math.abs(lon).toFixed(1)}°${ew}`;
+  const ns = center.lat >= 0 ? 'N' : 'S';
+  const ew = center.lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(center.lat).toFixed(1)}°${ns} ${Math.abs(center.lon).toFixed(1)}°${ew}`;
 }
 
 // Re-run regionLabel on every existing cluster. Called after the country
@@ -1600,7 +1626,7 @@ function regionLabel({lat, lon}) {
 // then have lat/lon fallback names.
 function relabelClusters() {
   if (!state.clusters.length) return;
-  for (const c of state.clusters) c.name = regionLabel(c.center);
+  for (const c of state.clusters) c.name = regionLabel(c.center, c.points);
   applyRegionNameOverrides(state.clusters);
   renderClusterLabels();
   updatePanel();
