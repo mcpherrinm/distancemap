@@ -223,6 +223,117 @@
   }
   .drop input[type=file] { display: none; }
 
+  /* Overpass-query tile shares the dropzone aesthetic but is a button
+     that opens the modal. Reset the browser button defaults. */
+  button.drop {
+    width: 100%;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    margin-bottom: 10px;
+  }
+
+  /* ---------- Query dialog ---------- */
+  dialog.query-dialog {
+    background: linear-gradient(180deg, rgba(7,17,29,0.98), rgba(3,6,12,0.98));
+    color: var(--ink);
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 40px rgba(255,122,0,0.18), 0 8px 40px rgba(0,0,0,0.6);
+    padding: 0;
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 64px);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    /* Center in the viewport. Some UA stylesheets pin <dialog> to top-left
+       with `inset: 0; margin: auto` only resolving horizontally — making
+       both axes explicit fixes that. */
+    margin: auto;
+    inset: 0;
+  }
+  dialog.query-dialog::backdrop {
+    background: rgba(3,6,12,0.7);
+    backdrop-filter: blur(2px);
+  }
+  .query-dialog-inner {
+    display: flex; flex-direction: column;
+    gap: 12px;
+    padding: 18px 20px 16px;
+  }
+  .query-dialog-head {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line-soft);
+    padding-bottom: 10px;
+  }
+  .query-dialog-title {
+    font-size: 11px; letter-spacing: 0.32em;
+    text-transform: uppercase; color: var(--amber);
+  }
+  .query-dialog-close {
+    background: transparent;
+    color: var(--ink-fade);
+    border: 1px solid var(--line);
+    width: 26px; height: 26px;
+    line-height: 1;
+    font-size: 16px;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+    font-family: inherit;
+    padding: 0;
+  }
+  .query-dialog-close:hover {
+    color: var(--warn); border-color: var(--warn);
+    background: rgba(255,90,90,0.10);
+  }
+  .query-field {
+    display: flex; flex-direction: column;
+    gap: 4px;
+  }
+  .query-field .lbl {
+    font-size: 9px; letter-spacing: 0.3em;
+    color: var(--ink-fade); text-transform: uppercase;
+  }
+  .query-url-input,
+  .query-input {
+    width: 100%;
+    background: var(--bg-1);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.45;
+    outline: none;
+    display: block;
+    transition: border-color 0.15s;
+  }
+  .query-input { resize: vertical; min-height: 140px; }
+  .query-url-input:focus,
+  .query-input:focus { border-color: var(--amber); }
+  .query-dialog-foot {
+    display: flex; align-items: center; gap: 12px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 12px;
+  }
+  .query-run {
+    background: transparent; color: var(--amber);
+    border: 1px solid var(--amber);
+    font-family: inherit; font-size: 10px;
+    letter-spacing: 0.25em; text-transform: uppercase;
+    padding: 6px 16px; cursor: pointer;
+    transition: background 0.12s;
+  }
+  .query-run:hover { background: rgba(255,179,71,0.10); }
+  .query-run:disabled {
+    color: var(--ink-fade); border-color: var(--line);
+    cursor: wait; background: transparent;
+  }
+  .query-status {
+    font-size: 10px; color: var(--ink-fade);
+    letter-spacing: 0.05em;
+    flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .query-status.err { color: var(--warn); }
+
   .proj-switch { margin-top: 16px; }
   .proj-switch .lbl {
     font-size: 9px; letter-spacing: 0.3em;
@@ -383,7 +494,7 @@
   }
   .source-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto auto auto;
     gap: 8px;
     align-items: center;
     padding: 3px 0;
@@ -400,11 +511,11 @@
     font-variant-numeric: tabular-nums;
     font-size: 10px;
   }
-  .source-del {
+  .source-icon-btn {
     background: transparent;
     border: none;
     padding: 2px 4px;
-    margin: 0 -4px 0 0;
+    margin: 0;
     color: var(--ink-fade);
     cursor: pointer;
     display: inline-flex;
@@ -412,11 +523,16 @@
     border-radius: 2px;
     transition: color 0.12s, background 0.12s;
   }
-  .source-del:hover {
+  .source-icon-btn:focus { outline: none; }
+  .source-dl:hover, .source-dl:focus {
+    color: var(--cyan);
+    background: rgba(94,224,255,0.10);
+  }
+  .source-del { margin-right: -4px; }
+  .source-del:hover, .source-del:focus {
     color: var(--warn);
     background: rgba(255,90,90,0.10);
   }
-  .source-del:focus { outline: none; color: var(--warn); }
 
   .section-title {
     margin-top: 22px;
@@ -544,10 +660,16 @@
 
 <aside>
   <div class="panel-body">
+    <button type="button" class="drop" id="open-query">
+      <div class="icon">&gt;_</div>
+      <div class="lab">Overpass Query</div>
+      <div class="hint">run a live query against an Overpass API</div>
+    </button>
+
     <label class="drop" id="drop">
       <div class="icon">⤓</div>
-      <div class="lab">Drop OSM file(s)</div>
-      <div class="hint">Overpass JSON or GeoJSON · multi-select OK</div>
+      <div class="lab">Drop file(s)</div>
+      <div class="hint">Saved query · Overpass JSON · GeoJSON</div>
       <input type="file" id="file" multiple accept=".json,.geojson,application/json,application/geo+json"/>
     </label>
 
@@ -644,6 +766,31 @@
 <div id="readout"></div>
 <div class="toast" id="toast"></div>
 
+<dialog id="query-dialog" class="query-dialog" aria-labelledby="query-dialog-title">
+  <div class="query-dialog-inner">
+    <div class="query-dialog-head">
+      <span id="query-dialog-title" class="query-dialog-title">Overpass Query</span>
+      <button type="button" id="query-dialog-close" class="query-dialog-close" aria-label="Close">×</button>
+    </div>
+    <label class="query-field">
+      <span class="lbl">Name</span>
+      <input type="text" id="query-name" class="query-url-input" required spellcheck="false" autocapitalize="off" autocorrect="off" />
+    </label>
+    <label class="query-field">
+      <span class="lbl">Endpoint</span>
+      <input type="url" id="query-url" class="query-url-input" spellcheck="false" autocapitalize="off" autocorrect="off" />
+    </label>
+    <label class="query-field">
+      <span class="lbl">Query</span>
+      <textarea id="query-input" class="query-input" spellcheck="false" autocapitalize="off" autocorrect="off" rows="10"></textarea>
+    </label>
+    <div class="query-dialog-foot">
+      <span id="query-status" class="query-status"></span>
+      <button type="button" id="query-run" class="query-run">Run Query</button>
+    </div>
+  </div>
+</dialog>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-geo-projection@4.0.0/dist/d3-geo-projection.min.js"></script>
 
@@ -680,6 +827,14 @@ const wrap180 = (x) => ((x + 180) % 360 + 360) % 360 - 180;
 const clampPhi = (x) => Math.max(-90, Math.min(90, x));
 const loadedFiles = [];
 const STORAGE_KEY = 'distancemap.loadedFiles.v1';
+const QUERY_KEY      = 'distancemap.query.v1';
+const QUERY_URL_KEY  = 'distancemap.queryUrl.v1';
+const QUERY_NAME_KEY = 'distancemap.queryName.v1';
+const DEFAULT_QUERY_URL = 'https://overpass-api.de/api/interpreter';
+const DEFAULT_QUERY = `[out:json][timeout:60];
+// AWS data centers worldwide
+nwr["operator:short"="AWS"]["telecom"="data_center"];
+out center;`;
 
 function persistLoadedFiles() {
   try {
@@ -1568,6 +1723,162 @@ function removeSource(idx) {
   showToast(`removed ${removed.name} · ${state.points.length} points · ${state.clusters.length} regions`);
 }
 
+/* ---------- OVERPASS QUERY DIALOG ---------- */
+const queryDialog  = document.getElementById('query-dialog');
+const queryInput   = document.getElementById('query-input');
+const queryUrlInp  = document.getElementById('query-url');
+const queryNameInp = document.getElementById('query-name');
+const queryBtn     = document.getElementById('query-run');
+const queryStatus  = document.getElementById('query-status');
+const openQueryBtn  = document.getElementById('open-query');
+const closeQueryBtn = document.getElementById('query-dialog-close');
+
+function freshQueryName() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return `query-${stamp}.json`;
+}
+
+// Restore persisted query, endpoint, and name; falling back to defaults
+(function restoreQueryState() {
+  let savedQ = null, savedUrl = null, savedName = null;
+  try { savedQ    = localStorage.getItem(QUERY_KEY); }      catch (e) {}
+  try { savedUrl  = localStorage.getItem(QUERY_URL_KEY); }  catch (e) {}
+  try { savedName = localStorage.getItem(QUERY_NAME_KEY); } catch (e) {}
+  queryInput.value   = savedQ    != null ? savedQ   : DEFAULT_QUERY;
+  queryUrlInp.value  = savedUrl  != null ? savedUrl : DEFAULT_QUERY_URL;
+  queryNameInp.value = savedName ? savedName : freshQueryName();
+})();
+
+// Debounced persistence — both fields share the same handler so editing
+// either one writes back without spamming localStorage on every keystroke.
+const persistField = (key, el) => {
+  let t;
+  el.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      try { localStorage.setItem(key, el.value); } catch (e) {}
+    }, 400);
+  });
+};
+persistField(QUERY_KEY, queryInput);
+persistField(QUERY_URL_KEY, queryUrlInp);
+persistField(QUERY_NAME_KEY, queryNameInp);
+
+function setQueryStatus(msg, isErr) {
+  queryStatus.textContent = msg || '';
+  queryStatus.classList.toggle('err', !!isErr);
+}
+
+function openQueryDialog() {
+  setQueryStatus('', false);
+  // Replenish the timestamp default if the user cleared it; otherwise leave
+  // their typed name alone so iterating on a query keeps the same label.
+  if (!queryNameInp.value.trim()) queryNameInp.value = freshQueryName();
+  if (typeof queryDialog.showModal === 'function') queryDialog.showModal();
+  else queryDialog.setAttribute('open', '');
+  // Focus the textarea once the dialog is on-screen
+  setTimeout(() => queryInput.focus(), 0);
+}
+function closeQueryDialog() {
+  if (typeof queryDialog.close === 'function') queryDialog.close();
+  else queryDialog.removeAttribute('open');
+}
+
+openQueryBtn.addEventListener('click', openQueryDialog);
+closeQueryBtn.addEventListener('click', closeQueryDialog);
+// Click on backdrop closes the dialog
+queryDialog.addEventListener('click', (e) => {
+  if (e.target === queryDialog) closeQueryDialog();
+});
+
+async function runOverpassQuery() {
+  const q    = queryInput.value.trim();
+  const url  = queryUrlInp.value.trim();
+  const name = queryNameInp.value.trim();
+  if (!name) { setQueryStatus('name required', true); queryNameInp.focus(); return; }
+  if (!q)    { setQueryStatus('empty query', true); return; }
+  if (!url)  { setQueryStatus('endpoint URL required', true); return; }
+  queryBtn.disabled = true;
+  setQueryStatus('querying overpass…', false);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ data: q }).toString()
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      // Overpass error bodies are HTML-ish — strip tags for a brief snippet
+      const snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+      throw new Error(`HTTP ${res.status}${snippet ? ': ' + snippet : ''}`);
+    }
+    let json;
+    try { json = JSON.parse(text); }
+    catch (_) { throw new Error('response was not JSON — add [out:json] to your query'); }
+    const incoming = parseSource(json);
+    if (!incoming.length) { setQueryStatus('0 points returned', true); return; }
+    // downloadSource() will tack on .json if the name lacks a json/geojson
+    // extension, so users don't need to type one.
+    loadedFiles.push({ name, points: incoming });
+    recomputeFromSources();
+    rebuildClusters();
+    persistLoadedFiles();
+    renderAll();
+    updatePanel();
+    setQueryStatus(`+${incoming.length} points`, false);
+    showToast(`+${incoming.length} · ${state.points.length} points · ${state.clusters.length} regions`);
+  } catch (e) {
+    setQueryStatus(e.message || 'query failed', true);
+  } finally {
+    queryBtn.disabled = false;
+  }
+}
+
+queryBtn.addEventListener('click', runOverpassQuery);
+queryInput.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    runOverpassQuery();
+  }
+});
+
+/* ---------- SOURCE DOWNLOAD ---------- */
+// Reconstruct an Overpass-shaped JSON from a source's parsed points so the
+// file round-trips through parseSource() on re-import. Synthesizes node ids
+// per element since the original ids weren't retained on parse.
+function serializeSource(src) {
+  return {
+    version: 0.6,
+    generator: 'distancemap',
+    elements: src.points.map((p, i) => ({
+      type: 'node',
+      id: i + 1,
+      lat: p.lat,
+      lon: p.lon,
+      tags: p.tags || {}
+    }))
+  };
+}
+
+function downloadSource(idx) {
+  const src = loadedFiles[idx];
+  if (!src) return;
+  const blob = new Blob(
+    [JSON.stringify(serializeSource(src), null, 2)],
+    { type: 'application/json' }
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  let name = src.name || 'source.json';
+  if (!/\.(json|geojson)$/i.test(name)) name += '.json';
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /* ---------- DROPZONE ---------- */
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
@@ -1601,14 +1912,21 @@ function updatePanel() {
       const count = document.createElement('span');
       count.className = 'source-count';
       count.textContent = f.points.length;
+      const dl = document.createElement('button');
+      dl.className = 'source-icon-btn source-dl';
+      dl.title = `Download ${f.name}`;
+      dl.setAttribute('aria-label', `Download ${f.name}`);
+      dl.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+      dl.addEventListener('click', () => downloadSource(idx));
       const del = document.createElement('button');
-      del.className = 'source-del';
+      del.className = 'source-icon-btn source-del';
       del.title = `Remove ${f.name}`;
       del.setAttribute('aria-label', `Remove ${f.name}`);
       del.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
       del.addEventListener('click', () => removeSource(idx));
       row.appendChild(name);
       row.appendChild(count);
+      row.appendChild(dl);
       row.appendChild(del);
       fl.appendChild(row);
     });
@@ -1752,7 +2070,7 @@ async function boot() {
     if (loadedFiles.length) {
       showToast(`READY · ${state.points.length} points · ${state.clusters.length} regions restored`);
     } else {
-      showToast('READY · LOAD OVERPASS EXPORT');
+      showToast('READY · OPEN OVERPASS QUERY OR DROP A FILE');
     }
   }, 600);
 }
