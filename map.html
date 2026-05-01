@@ -1334,6 +1334,7 @@ async function loadGeo() {
     state.countriesGeo = topoToGeoJSON(topo, 'countries');
     renderLand();
     renderCountryBorders();
+    relabelClusters();
   });
   // states-50m.json is a stripped Natural Earth admin_1 50m FeatureCollection;
   // covers subnational data for US, Canada, Russia, China, India, Indonesia,
@@ -1342,6 +1343,7 @@ async function loadGeo() {
     if (!geo) return;
     state.statesGeo = geo;
     renderStateBorders();
+    relabelClusters();
   });
 }
 
@@ -1509,7 +1511,7 @@ function clusterByDistance(points, maxKm) {
     for (const p of pts) maxD = Math.max(maxD, haversineKm(center, p));
     clusters.push({
       center, points: pts,
-      name: regionLabel(center, pts),
+      name: regionLabel(center),
       radiusKm: Math.max(60, Math.min(maxD + 30, maxKm))
     });
   }
@@ -1517,20 +1519,39 @@ function clusterByDistance(points, maxKm) {
   return clusters;
 }
 
-function regionLabel({lat, lon}, pts) {
-  for (const p of pts) {
-    const t = p.tags || {};
-    if (t.region) return t.region;
+// Look up the political region a point falls in, using the loaded basemap
+// data. Prefers state/province (Natural Earth admin_1, 50m — covers 9
+// federations) over country (admin_0, 110m). Falls back to lat/lon when
+// the geo data isn't loaded yet or the point is at sea.
+function regionLabel({lat, lon}) {
+  const pt = [lon, lat];
+  if (state.statesGeo && typeof d3.geoContains === 'function') {
+    for (const f of state.statesGeo.features) {
+      if (f.properties && f.properties.name && d3.geoContains(f, pt)) {
+        return f.properties.name;
+      }
+    }
   }
-  for (const p of pts) {
-    const t = p.tags || {};
-    if (t['addr:city']) return t['addr:city'];
-    if (t['addr:state']) return t['addr:state'];
-    if (t['addr:country']) return t['addr:country'];
+  if (state.countriesGeo && typeof d3.geoContains === 'function') {
+    for (const f of state.countriesGeo.features) {
+      if (f.properties && f.properties.name && d3.geoContains(f, pt)) {
+        return f.properties.name;
+      }
+    }
   }
   const ns = lat >= 0 ? 'N' : 'S';
   const ew = lon >= 0 ? 'E' : 'W';
   return `${Math.abs(lat).toFixed(1)}°${ns} ${Math.abs(lon).toFixed(1)}°${ew}`;
+}
+
+// Re-run regionLabel on every existing cluster. Called after the country
+// or state geo files finish loading post-boot, since clusters built before
+// then have lat/lon fallback names.
+function relabelClusters() {
+  if (!state.clusters.length) return;
+  for (const c of state.clusters) c.name = regionLabel(c.center);
+  renderClusterLabels();
+  updatePanel();
 }
 
 function rebuildClusters() {
