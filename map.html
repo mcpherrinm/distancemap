@@ -482,6 +482,10 @@
     background: rgba(255,179,71,0.10);
     box-shadow: 0 0 8px rgba(255,122,0,0.3);
   }
+  /* Color variants for the .ctrl-btn skeleton — pick one of these instead
+     of inline `style="border-color: ...; color: ...;"` on individual buttons. */
+  .ctrl-btn.cyan  { border-color: var(--cyan);  color: var(--cyan); }
+  .ctrl-btn.amber { border-color: var(--amber); color: var(--amber); }
 
   .measure-status {
     font-size: 9px;
@@ -833,11 +837,11 @@
       <div id="measure-status" class="measure-status"></div>
       <div class="ctrl-row">
         <span>Reset View</span>
-        <button id="btn-reset-view" class="ctrl-btn" style="border-color: var(--cyan); color: var(--cyan);">Recenter</button>
+        <button id="btn-reset-view" class="ctrl-btn cyan">Recenter</button>
       </div>
       <div class="ctrl-row">
         <span>Export</span>
-        <button id="btn-export-svg" class="ctrl-btn" style="border-color: var(--amber); color: var(--amber);">Save SVG</button>
+        <button id="btn-export-svg" class="ctrl-btn amber">Save SVG</button>
       </div>
     </div>
 
@@ -1556,6 +1560,26 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+/* ---------- ICONS ---------- */
+// Feather-style 11px glyphs reused by the panel buttons. Hoisted so the
+// markup isn't duplicated inline in updatePanel().
+const ICON_SVG_OPEN  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+const ICON_EYE_OPEN  = `${ICON_SVG_OPEN}<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+const ICON_EYE_OFF   = `${ICON_SVG_OPEN}<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+const ICON_DOWNLOAD  = `${ICON_SVG_OPEN}<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+const ICON_TRASH     = `${ICON_SVG_OPEN}<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+
+function makeIconButton({ className, title, svg, onClick, ariaPressed }) {
+  const btn = document.createElement('button');
+  btn.className = className;
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
+  if (ariaPressed != null) btn.setAttribute('aria-pressed', String(ariaPressed));
+  btn.innerHTML = svg;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
 /* ---------- CLUSTERING ---------- */
 function clusterByDistance(points, maxKm) {
   const n = points.length;
@@ -1704,8 +1728,8 @@ function renderBackground() {
 
 // Approximate subsolar point — the location on Earth where the sun is
 // directly overhead — using a low-precision solar declination + equation
-// of time model. Plenty good for a decorative day/night wash; off by under
-// half a degree vs precise ephemerides.
+// of time model. Off by a degree or two vs precise ephemerides; plenty
+// good for a decorative day/night wash.
 function subsolarPoint(date) {
   const start = Date.UTC(date.getUTCFullYear(), 0, 0);
   const N = (date.getTime() - start) / 86400000;
@@ -1919,11 +1943,7 @@ async function ingestFiles(fileList) {
       errors.push(f.name);
     }
   }
-  recomputeFromSources();
-  rebuildClusters();
-  persistLoadedFiles();
-  renderAll();
-  updatePanel();
+  refreshFromSources();
   const errSuffix = errors.length ? ` · ${errors.length} ERR` : '';
   const fileWord = files.length > 1 ? `${files.length} files` : '1 file';
   showToast(`+${totalAdded} · ${fileWord}${errSuffix} · ${state.points.length} points · ${state.clusters.length} regions`);
@@ -1943,26 +1963,27 @@ function recomputeFromSources() {
   }
 }
 
-function removeSource(idx) {
-  if (idx < 0 || idx >= loadedFiles.length) return;
-  const removed = loadedFiles.splice(idx, 1)[0];
+// Standard "loadedFiles changed → reflect that everywhere" sequence.
+// Call after any push/splice/hidden-flip on loadedFiles.
+function refreshFromSources() {
   recomputeFromSources();
   rebuildClusters();
   persistLoadedFiles();
   renderAll();
   updatePanel();
+}
+
+function removeSource(idx) {
+  if (idx < 0 || idx >= loadedFiles.length) return;
+  const removed = loadedFiles.splice(idx, 1)[0];
+  refreshFromSources();
   showToast(`removed ${removed.name} · ${state.points.length} points · ${state.clusters.length} regions`);
 }
 
 function toggleSourceHidden(idx) {
   if (idx < 0 || idx >= loadedFiles.length) return;
-  const f = loadedFiles[idx];
-  f.hidden = !f.hidden;
-  recomputeFromSources();
-  rebuildClusters();
-  persistLoadedFiles();
-  renderAll();
-  updatePanel();
+  loadedFiles[idx].hidden = !loadedFiles[idx].hidden;
+  refreshFromSources();
 }
 
 /* ---------- MEASUREMENTS ---------- */
@@ -2275,11 +2296,7 @@ async function runOverpassQuery() {
     // downloadSource() will tack on .json if the name lacks a json/geojson
     // extension, so users don't need to type one.
     loadedFiles.push({ name, points: incoming });
-    recomputeFromSources();
-    rebuildClusters();
-    persistLoadedFiles();
-    renderAll();
-    updatePanel();
+    refreshFromSources();
     closeQueryDialog();
     showToast(`success · +${incoming.length} points`);
   } catch (e) {
@@ -2356,11 +2373,15 @@ fileInput.addEventListener('change', e => {
   ingestFiles(e.target.files);
   e.target.value = '';
 });
-;['dragenter','dragover'].forEach(ev =>
-  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
-;['dragleave','drop'].forEach(ev =>
-  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', e => ingestFiles(e.dataTransfer.files));
+for (const ev of ['dragenter', 'dragover']) {
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); });
+}
+drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('over'); });
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  ingestFiles(e.dataTransfer.files);
+});
 
 /* ---------- PANEL UPDATE ---------- */
 function updatePanel() {
@@ -2371,9 +2392,6 @@ function updatePanel() {
     header.className = 'sources-header';
     header.textContent = 'Sources';
     fl.appendChild(header);
-    // Feather-style eye SVGs reused for the visibility toggle.
-    const EYE_OPEN_SVG  = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
-    const EYE_OFF_SVG   = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
     loadedFiles.forEach((f, idx) => {
       const row = document.createElement('div');
       row.className = 'source-row' + (f.hidden ? ' is-hidden' : '');
@@ -2384,25 +2402,25 @@ function updatePanel() {
       const count = document.createElement('span');
       count.className = 'source-count';
       count.textContent = f.points.length;
-      const eye = document.createElement('button');
-      eye.className = 'source-icon-btn source-eye';
-      eye.title = f.hidden ? `Show ${f.name}` : `Hide ${f.name}`;
-      eye.setAttribute('aria-label', eye.title);
-      eye.setAttribute('aria-pressed', String(!!f.hidden));
-      eye.innerHTML = f.hidden ? EYE_OFF_SVG : EYE_OPEN_SVG;
-      eye.addEventListener('click', () => toggleSourceHidden(idx));
-      const dl = document.createElement('button');
-      dl.className = 'source-icon-btn source-dl';
-      dl.title = `Download ${f.name}`;
-      dl.setAttribute('aria-label', `Download ${f.name}`);
-      dl.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
-      dl.addEventListener('click', () => downloadSource(idx));
-      const del = document.createElement('button');
-      del.className = 'source-icon-btn source-del';
-      del.title = `Remove ${f.name}`;
-      del.setAttribute('aria-label', `Remove ${f.name}`);
-      del.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
-      del.addEventListener('click', () => removeSource(idx));
+      const eye = makeIconButton({
+        className: 'source-icon-btn source-eye',
+        title: f.hidden ? `Show ${f.name}` : `Hide ${f.name}`,
+        svg: f.hidden ? ICON_EYE_OFF : ICON_EYE_OPEN,
+        ariaPressed: !!f.hidden,
+        onClick: () => toggleSourceHidden(idx),
+      });
+      const dl = makeIconButton({
+        className: 'source-icon-btn source-dl',
+        title: `Download ${f.name}`,
+        svg: ICON_DOWNLOAD,
+        onClick: () => downloadSource(idx),
+      });
+      const del = makeIconButton({
+        className: 'source-icon-btn source-del',
+        title: `Remove ${f.name}`,
+        svg: ICON_TRASH,
+        onClick: () => removeSource(idx),
+      });
       row.appendChild(name);
       row.appendChild(count);
       row.appendChild(eye);
@@ -2429,12 +2447,12 @@ function updatePanel() {
       const dist = document.createElement('span');
       dist.className = 'measure-dist';
       dist.textContent = formatKm(m.distKm);
-      const del = document.createElement('button');
-      del.className = 'source-icon-btn source-del';
-      del.title = 'Remove measurement';
-      del.setAttribute('aria-label', 'Remove measurement');
-      del.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
-      del.addEventListener('click', () => removeMeasurement(idx));
+      const del = makeIconButton({
+        className: 'source-icon-btn source-del',
+        title: 'Remove measurement',
+        svg: ICON_TRASH,
+        onClick: () => removeMeasurement(idx),
+      });
       row.appendChild(label);
       row.appendChild(dist);
       row.appendChild(del);
