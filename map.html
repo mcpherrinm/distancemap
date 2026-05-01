@@ -569,10 +569,16 @@
   }
   .source-row {
     display: grid;
-    grid-template-columns: 1fr auto auto auto;
+    grid-template-columns: 1fr auto auto auto auto;
     gap: 8px;
     align-items: center;
     padding: 3px 0;
+  }
+  .source-row.is-hidden .source-name,
+  .source-row.is-hidden .source-count {
+    color: var(--ink-fade);
+    text-decoration: line-through;
+    text-decoration-color: rgba(132,160,191,0.45);
   }
   .source-name {
     color: var(--ink);
@@ -603,6 +609,11 @@
     color: var(--cyan);
     background: rgba(94,224,255,0.10);
   }
+  .source-eye:hover, .source-eye:focus {
+    color: var(--amber);
+    background: rgba(255,179,71,0.10);
+  }
+  .source-row.is-hidden .source-eye { color: var(--ink-fade); }
   .source-del { margin-right: -4px; }
   .source-del:hover, .source-del:focus {
     color: var(--warn);
@@ -912,7 +923,6 @@ const loadedFiles = [];
 const STORAGE_KEY = 'distancemap.loadedFiles.v1';
 const QUERY_KEY      = 'distancemap.query.v1';
 const QUERY_URL_KEY  = 'distancemap.queryUrl.v1';
-const QUERY_NAME_KEY = 'distancemap.queryName.v1';
 const DEFAULT_QUERY_URL = 'https://overpass-api.de/api/interpreter';
 const DEFAULT_QUERY = `[out:json][timeout:60];
 // AWS data centers worldwide
@@ -937,7 +947,7 @@ function restoreLoadedFiles() {
   if (!Array.isArray(parsed)) return;
   for (const f of parsed) {
     if (f && typeof f.name === 'string' && Array.isArray(f.points)) {
-      loadedFiles.push({ name: f.name, points: f.points });
+      loadedFiles.push({ name: f.name, points: f.points, hidden: !!f.hidden });
     }
   }
   recomputeFromSources();
@@ -1886,6 +1896,7 @@ function recomputeFromSources() {
   state.points = [];
   const seen = new Set();
   for (const f of loadedFiles) {
+    if (f.hidden) continue;
     for (const p of f.points) {
       const k = `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
       if (seen.has(k)) continue;
@@ -1904,6 +1915,17 @@ function removeSource(idx) {
   renderAll();
   updatePanel();
   showToast(`removed ${removed.name} · ${state.points.length} points · ${state.clusters.length} regions`);
+}
+
+function toggleSourceHidden(idx) {
+  if (idx < 0 || idx >= loadedFiles.length) return;
+  const f = loadedFiles[idx];
+  f.hidden = !f.hidden;
+  recomputeFromSources();
+  rebuildClusters();
+  persistLoadedFiles();
+  renderAll();
+  updatePanel();
 }
 
 /* ---------- MEASUREMENTS ---------- */
@@ -2028,15 +2050,17 @@ function freshQueryName() {
   return `query-${stamp}.json`;
 }
 
-// Restore persisted query, endpoint, and name; falling back to defaults
+// Restore persisted query and endpoint, falling back to defaults. The name
+// field deliberately does NOT persist — it always starts at a fresh
+// timestamp so users don't accidentally reuse the previous source name and
+// silently overwrite (or merge into) an existing source.
 (function restoreQueryState() {
-  let savedQ = null, savedUrl = null, savedName = null;
+  let savedQ = null, savedUrl = null;
   try { savedQ    = localStorage.getItem(QUERY_KEY); }      catch (e) {}
   try { savedUrl  = localStorage.getItem(QUERY_URL_KEY); }  catch (e) {}
-  try { savedName = localStorage.getItem(QUERY_NAME_KEY); } catch (e) {}
   queryInput.value   = savedQ    != null ? savedQ   : DEFAULT_QUERY;
   queryUrlInp.value  = savedUrl  != null ? savedUrl : DEFAULT_QUERY_URL;
-  queryNameInp.value = savedName ? savedName : freshQueryName();
+  queryNameInp.value = freshQueryName();
 })();
 
 // Debounced persistence — both fields share the same handler so editing
@@ -2052,7 +2076,6 @@ const persistField = (key, el) => {
 };
 persistField(QUERY_KEY, queryInput);
 persistField(QUERY_URL_KEY, queryUrlInp);
-persistField(QUERY_NAME_KEY, queryNameInp);
 
 function setQueryStatus(msg, isErr) {
   queryStatus.textContent = msg || '';
@@ -2088,9 +2111,9 @@ function setQueryStatusHtml(prefix, html, isErr) {
 
 function openQueryDialog() {
   setQueryStatus('', false);
-  // Replenish the timestamp default if the user cleared it; otherwise leave
-  // their typed name alone so iterating on a query keeps the same label.
-  if (!queryNameInp.value.trim()) queryNameInp.value = freshQueryName();
+  // Always reset to a fresh timestamp on open so users don't accidentally
+  // reuse a prior name (which would silently merge into the existing source).
+  queryNameInp.value = freshQueryName();
   if (typeof queryDialog.showModal === 'function') queryDialog.showModal();
   else queryDialog.setAttribute('open', '');
   // Focus the textarea once the dialog is on-screen
@@ -2311,9 +2334,12 @@ function updatePanel() {
     header.className = 'sources-header';
     header.textContent = 'Sources';
     fl.appendChild(header);
+    // Feather-style eye SVGs reused for the visibility toggle.
+    const EYE_OPEN_SVG  = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    const EYE_OFF_SVG   = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
     loadedFiles.forEach((f, idx) => {
       const row = document.createElement('div');
-      row.className = 'source-row';
+      row.className = 'source-row' + (f.hidden ? ' is-hidden' : '');
       const name = document.createElement('span');
       name.className = 'source-name';
       name.textContent = f.name;
@@ -2321,6 +2347,13 @@ function updatePanel() {
       const count = document.createElement('span');
       count.className = 'source-count';
       count.textContent = f.points.length;
+      const eye = document.createElement('button');
+      eye.className = 'source-icon-btn source-eye';
+      eye.title = f.hidden ? `Show ${f.name}` : `Hide ${f.name}`;
+      eye.setAttribute('aria-label', eye.title);
+      eye.setAttribute('aria-pressed', String(!!f.hidden));
+      eye.innerHTML = f.hidden ? EYE_OFF_SVG : EYE_OPEN_SVG;
+      eye.addEventListener('click', () => toggleSourceHidden(idx));
       const dl = document.createElement('button');
       dl.className = 'source-icon-btn source-dl';
       dl.title = `Download ${f.name}`;
@@ -2335,6 +2368,7 @@ function updatePanel() {
       del.addEventListener('click', () => removeSource(idx));
       row.appendChild(name);
       row.appendChild(count);
+      row.appendChild(eye);
       row.appendChild(dl);
       row.appendChild(del);
       fl.appendChild(row);
