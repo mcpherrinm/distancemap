@@ -934,6 +934,55 @@ function restoreLoadedFiles() {
   rebuildClusters();
 }
 
+// Manual region renames survive reload by being stored separately from the
+// clusters themselves (which are rebuilt from raw points on every load).
+// Each override is anchored to the cluster center it was set on; reapplied
+// to whichever new cluster is closest, within NAME_MATCH_KM of that anchor,
+// so small shifts in cluster center (from added/removed points) don't lose it.
+const REGION_NAMES_KEY = 'distancemap.regionNames.v1';
+const NAME_MATCH_KM = CLUSTER_KM / 2;
+let regionNameOverrides = [];
+
+function restoreRegionNames() {
+  try {
+    const raw = localStorage.getItem(REGION_NAMES_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    regionNameOverrides = parsed.filter(o =>
+      o && typeof o.name === 'string' &&
+      Number.isFinite(o.lat) && Number.isFinite(o.lon));
+  } catch (_) { /* ignore */ }
+}
+
+function persistRegionNames() {
+  try { localStorage.setItem(REGION_NAMES_KEY, JSON.stringify(regionNameOverrides)); }
+  catch (_) { /* storage full — silent, the rest of the app still works */ }
+}
+
+function setRegionNameOverride(center, name) {
+  // Drop any nearby existing override so repeated renames don't accumulate.
+  for (let i = regionNameOverrides.length - 1; i >= 0; i--) {
+    if (haversineKm(regionNameOverrides[i], center) <= NAME_MATCH_KM) {
+      regionNameOverrides.splice(i, 1);
+    }
+  }
+  regionNameOverrides.push({ lat: center.lat, lon: center.lon, name });
+  persistRegionNames();
+}
+
+function applyRegionNameOverrides(clusters) {
+  if (!regionNameOverrides.length) return;
+  for (const c of clusters) {
+    let best = null, bestD = NAME_MATCH_KM + 1;
+    for (const o of regionNameOverrides) {
+      const d = haversineKm(o, c.center);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    if (best) c.name = best.name;
+  }
+}
+
 const mapContainer = document.getElementById('map-container');
 const svg        = d3.select('#map-svg');
 const zoomRoot   = d3.select('#zoom-root');
@@ -1552,12 +1601,14 @@ function regionLabel({lat, lon}) {
 function relabelClusters() {
   if (!state.clusters.length) return;
   for (const c of state.clusters) c.name = regionLabel(c.center);
+  applyRegionNameOverrides(state.clusters);
   renderClusterLabels();
   updatePanel();
 }
 
 function rebuildClusters() {
   state.clusters = clusterByDistance(state.points, CLUSTER_KM);
+  applyRegionNameOverrides(state.clusters);
   // Cancel any in-progress measurement — the cluster index it referenced
   // may now point at a different cluster (or none).
   state.measureFirstIdx = null;
@@ -2296,7 +2347,10 @@ function updatePanel() {
       const v = nameEl.textContent.replace(/\s+/g, ' ').trim();
       const next = v || c.name;
       nameEl.textContent = next;
-      c.name = next;
+      if (next !== c.name) {
+        c.name = next;
+        setRegionNameOverride(c.center, next);
+      }
       renderClusterLabels();
     });
     nameEl.addEventListener('keydown', e => {
@@ -2403,6 +2457,9 @@ addEventListener('resize', () => {
 
 /* ---------- BOOT ---------- */
 async function boot() {
+  // Region-name overrides must be loaded before clusters are built so the
+  // first render shows persisted names rather than auto-generated ones.
+  restoreRegionNames();
   restoreLoadedFiles();
   restoreMeasurements();
   renderAll();
