@@ -113,6 +113,20 @@
     stroke-opacity: 0.6;
     stroke-dasharray: 2 2;
   }
+  .lake {
+    fill: rgba(8, 18, 32, 0.85);
+    stroke: var(--cyan-soft);
+    stroke-width: 0.4;
+    stroke-opacity: 0.75;
+  }
+  .river {
+    fill: none;
+    stroke: var(--cyan-soft);
+    stroke-width: 0.5;
+    stroke-opacity: 0.7;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
 
   .arc {
     fill: none;
@@ -744,6 +758,8 @@
       <path id="graticule-eq" class="graticule graticule-equator" />
       <path id="graticule" class="graticule" />
       <g id="land-layer"></g>
+      <g id="lake-layer"></g>
+      <g id="river-layer"></g>
       <g id="state-border-layer"></g>
       <g id="country-border-layer"></g>
       <g id="arc-layer"></g>
@@ -829,6 +845,10 @@
       <div class="ctrl-row">
         <span>Borders</span>
         <div class="toggle on" id="t-borders"></div>
+      </div>
+      <div class="ctrl-row">
+        <span>Water</span>
+        <div class="toggle on" id="t-water"></div>
       </div>
       <div class="ctrl-row">
         <span>Measure</span>
@@ -918,6 +938,7 @@ const state = {
   showRegionLabels: true,
   showContinents: true,
   showBorders: true,
+  showWater: true,
   projectionName: 'geoRobinson',
   // [λ, φ, γ] passed straight to projection.rotate(). Seeded from each
   // projection's natural orientation when the projection is swapped, then
@@ -925,7 +946,9 @@ const state = {
   rotation: [0, 0, 0],
   landGeo: null,
   countriesGeo: null,
-  statesGeo: null
+  statesGeo: null,
+  lakesGeo: null,
+  riversGeo: null
 };
 
 const wrap180 = (x) => ((x + 180) % 360 + 360) % 360 - 180;
@@ -1022,6 +1045,8 @@ const daylightEl = d3.select('#daylight');
 const gratEl     = d3.select('#graticule');
 const gratEqEl   = d3.select('#graticule-eq');
 const landLayer  = d3.select('#land-layer');
+const lakeLayer  = d3.select('#lake-layer');
+const riverLayer = d3.select('#river-layer');
 const stateBorderLayer   = d3.select('#state-border-layer');
 const countryBorderLayer = d3.select('#country-border-layer');
 const arcLayer   = d3.select('#arc-layer');
@@ -1355,6 +1380,8 @@ const EXPORT_CSS = `
 .land { fill: rgba(20,38,61,0.55); stroke: #5ee0ff; stroke-width: 0.6; stroke-opacity: 0.45; }
 .border-country { fill: none; stroke: #5ee0ff; stroke-width: 0.55; stroke-opacity: 0.75; }
 .border-state { fill: none; stroke: #2a7fa3; stroke-width: 0.35; stroke-opacity: 0.6; stroke-dasharray: 2 2; }
+.lake { fill: rgba(8,18,32,0.85); stroke: #2a7fa3; stroke-width: 0.4; stroke-opacity: 0.75; }
+.river { fill: none; stroke: #2a7fa3; stroke-width: 0.5; stroke-opacity: 0.7; stroke-linejoin: round; stroke-linecap: round; }
 .arc { fill: none; stroke: #fff2dd; stroke-width: 1; stroke-opacity: 0.7; }
 .arc-label { fill: #ffb347; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; font-weight: 500;
   paint-order: stroke; stroke: #03060c; stroke-width: 3; stroke-linejoin: round; text-anchor: middle; letter-spacing: 0.05em; }
@@ -1428,6 +1455,18 @@ async function loadGeo() {
     state.statesGeo = geo;
     renderStateBorders();
     relabelClusters();
+  });
+  // Natural Earth 110m water — major lakes (polygons) + major rivers
+  // (line strings). Both are full GeoJSON FeatureCollections.
+  fetchJSON('./lakes-110m.json').then(geo => {
+    if (!geo) return;
+    state.lakesGeo = geo;
+    renderLakes();
+  });
+  fetchJSON('./rivers-110m.json').then(geo => {
+    if (!geo) return;
+    state.riversGeo = geo;
+    renderRivers();
   });
 }
 
@@ -1706,6 +1745,8 @@ function renderAll() {
 function rerenderProjection() {
   renderBackground();
   renderLand();
+  renderLakes();
+  renderRivers();
   renderStateBorders();
   renderCountryBorders();
   renderArcs();
@@ -1761,6 +1802,26 @@ function renderLand() {
     .merge(sel)
     .attr('d', d => pathGen(d) || '');
   landLayer.attr('display', state.showContinents ? null : 'none');
+}
+
+function renderLakes() {
+  if (!state.lakesGeo) { lakeLayer.selectAll('*').remove(); return; }
+  const sel = lakeLayer.selectAll('path').data(state.lakesGeo.features || []);
+  sel.exit().remove();
+  sel.enter().append('path').attr('class','lake')
+    .merge(sel)
+    .attr('d', d => pathGen(d) || '');
+  lakeLayer.attr('display', state.showWater ? null : 'none');
+}
+
+function renderRivers() {
+  if (!state.riversGeo) { riverLayer.selectAll('*').remove(); return; }
+  const sel = riverLayer.selectAll('path').data(state.riversGeo.features || []);
+  sel.exit().remove();
+  sel.enter().append('path').attr('class','river')
+    .merge(sel)
+    .attr('d', d => pathGen(d) || '');
+  riverLayer.attr('display', state.showWater ? null : 'none');
 }
 
 function renderCountryBorders() {
@@ -2541,6 +2602,12 @@ document.getElementById('t-borders').addEventListener('click', e => {
   e.currentTarget.classList.toggle('on', state.showBorders);
   countryBorderLayer.attr('display', state.showBorders ? null : 'none');
   stateBorderLayer.attr('display', state.showBorders ? null : 'none');
+});
+document.getElementById('t-water').addEventListener('click', e => {
+  state.showWater = !state.showWater;
+  e.currentTarget.classList.toggle('on', state.showWater);
+  lakeLayer.attr('display', state.showWater ? null : 'none');
+  riverLayer.attr('display', state.showWater ? null : 'none');
 });
 
 /* ---------- PROJECTION SWITCH ---------- */
